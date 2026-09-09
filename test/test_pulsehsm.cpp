@@ -142,6 +142,152 @@ static void test_queue_fifo_order() {
     CHECK(strcmp(g_order, "1 2 3 4 5 6 ") == 0);
 }
 
+// ---- Initial substate tests -------------------------------------------------
+// Fixture: IP -> { IA -> { IC }, IB }
+//   IP.initialChild = IA,  IA.initialChild = IC
+static PulseHSM initFsm;
+static int IP, IA, IB, IC;
+static char initTrace[256];
+static void clearInitTrace() { initTrace[0] = '\0'; }
+static void ipEntry() { strncat(initTrace, "P+", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void ipExit()  { strncat(initTrace, "P-", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void iaEntry() { strncat(initTrace, "A+", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void iaExit()  { strncat(initTrace, "A-", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void ibEntry() { strncat(initTrace, "B+", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void ibExit()  { strncat(initTrace, "B-", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void icEntry() { strncat(initTrace, "C+", sizeof(initTrace) - strlen(initTrace) - 1); }
+static void icExit()  { strncat(initTrace, "C-", sizeof(initTrace) - strlen(initTrace) - 1); }
+
+static void buildInitFixture() {
+    initFsm = PulseHSM();
+    IP = initFsm.addState("P", nullptr, ipEntry, ipExit, 0, -1, nullptr, -1);
+    IA = initFsm.addState("A", nullptr, iaEntry, iaExit, 0, -1, nullptr, IP);
+    IB = initFsm.addState("B", nullptr, ibEntry, ibExit, 0, -1, nullptr, IP);
+    IC = initFsm.addState("C", nullptr, icEntry, icExit, 0, -1, nullptr, IA);
+    CHECK(initFsm.setInitial(IP, IA) == true);
+    CHECK(initFsm.setInitial(IA, IC) == true);
+}
+
+static void test_initial_substate_begin() {
+    buildInitFixture(); clearInitTrace();
+    CHECK(initFsm.begin(IP) == true);         // composite with initial child is valid
+    CHECK(initFsm.getCurrentState() == IC);   // resolved to deepest leaf
+    CHECK(strcmp(initTrace, "P+A+C+") == 0);  // outer-to-inner entry order
+}
+
+static void test_initial_substate_transition() {
+    buildInitFixture();
+    initFsm.begin(IB); initFsm.update(); clearInitTrace();
+    initFsm.transitionTo(IP); initFsm.update();
+    // IB exits, IP is LCA (not exited), IA and IC enter in order
+    CHECK(strcmp(initTrace, "B-A+C+") == 0);
+    CHECK(initFsm.getCurrentState() == IC);
+}
+
+static void test_initial_substate_nested() {
+    // Three-level initial chain: R -> M (initial) -> L (initial)
+    PulseHSM h;
+    static char tr[64]; tr[0] = '\0';
+    int R = h.addState("R", nullptr, [](){strncat(tr,"R+",sizeof(tr)-strlen(tr)-1);},
+                       nullptr, 0, -1, nullptr, -1);
+    int M = h.addState("M", nullptr, [](){strncat(tr,"M+",sizeof(tr)-strlen(tr)-1);},
+                       nullptr, 0, -1, nullptr, R);
+    int L = h.addState("L", nullptr, [](){strncat(tr,"L+",sizeof(tr)-strlen(tr)-1);},
+                       nullptr, 0, -1, nullptr, M);
+    int S = h.addState("S", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    h.setInitial(R, M);
+    h.setInitial(M, L);
+    h.begin(S); h.update(); tr[0] = '\0';
+    h.transitionTo(R); h.update();
+    CHECK(h.getCurrentState() == L);
+    CHECK(strcmp(tr, "R+M+L+") == 0);  // all three entered outer-to-inner
+}
+
+static void test_initial_substate_no_default() {
+    PulseHSM h;
+    int p = h.addState("P", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    int a = h.addState("A", nullptr, nullptr, nullptr, 0, -1, nullptr, p);
+    (void)a;
+    // P is composite but has no initial child -> begin(P) must fail
+    CHECK(h.begin(p) == false);
+}
+
+static void test_setInitial_validates_args() {
+    buildInitFixture();
+    CHECK(initFsm.setInitial(-1, IB) == false);  // bad parent index
+    CHECK(initFsm.setInitial(IP, -1) == false);  // bad child index
+    CHECK(initFsm.setInitial(IP, IC) == false);  // IC is grandchild, not direct child
+}
+
+static void test_leaf_precondition_still_works() {
+    // Without setInitial, composite is still rejected by begin().
+    buildFixture();
+    CHECK(fsm.begin(P) == false);  // composite, no initialChild set
+    CHECK(fsm.begin(A) == true);   // leaf accepted
+}
+
+// ---- sendEvent overflow returns false ---------------------------------------
+static void test_queue_overflow_returns_false() {
+    PulseHSM h;
+    int s = h.addState("s", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    h.begin(s);
+    bool allQueued = true;
+    for (int i = 0; i < PULSEHSM_MAX_EVENTS; i++)
+        if (!h.sendEvent(1)) allQueued = false;
+    CHECK(allQueued);          // first PULSEHSM_MAX_EVENTS events fit
+    CHECK(!h.sendEvent(1));    // next one overflows -> false
+    h.update();                // drain — no crash
+}
+
+// ---- Multiple independent instances don't interfere -------------------------
+static void test_multi_instance_isolation() {
+    PulseHSM mA, mB;
+    int sA1 = mA.addState("A1", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    int sA2 = mA.addState("A2", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    int sB1 = mB.addState("B1", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    int sB2 = mB.addState("B2", nullptr, nullptr, nullptr, 0, -1, nullptr, -1);
+    mA.begin(sA1); mA.update();
+    mB.begin(sB1); mB.update();
+    mA.transitionTo(sA2); mA.update();
+    CHECK(mA.getCurrentState() == sA2);
+    CHECK(mB.getCurrentState() == sB1);  // B untouched
+    mB.transitionTo(sB2); mB.update();
+    CHECK(mA.getCurrentState() == sA2);  // A untouched
+    CHECK(mB.getCurrentState() == sB2);
+}
+
+// ---- isInHierarchy across multiple levels -----------------------------------
+static void test_is_in_hierarchy_levels() {
+    buildFixture(); fsm.begin(A); fsm.update();
+    CHECK(fsm.isInHierarchy(A) == true);   // current leaf
+    CHECK(fsm.isInHierarchy(P) == true);   // active ancestor
+    CHECK(fsm.isInHierarchy(B) == false);  // sibling, not active
+}
+
+// ---- Reentrancy: transitionTo() called from inside entry() ------------------
+static PulseHSM reentrantFsm;
+static int RS0, RS1, RS2;
+static bool g_reentrantFired = false;
+static void rs1Entry() {
+    if (!g_reentrantFired) {
+        g_reentrantFired = true;
+        reentrantFsm.transitionTo(RS2);  // deferred — inTransition guard fires
+    }
+}
+
+static void test_reentrant_transition() {
+    reentrantFsm = PulseHSM();
+    RS0 = reentrantFsm.addState("S0", nullptr, nullptr,  nullptr, 0, -1, nullptr, -1);
+    RS1 = reentrantFsm.addState("S1", nullptr, rs1Entry, nullptr, 0, -1, nullptr, -1);
+    RS2 = reentrantFsm.addState("S2", nullptr, nullptr,  nullptr, 0, -1, nullptr, -1);
+    g_reentrantFired = false;
+    reentrantFsm.begin(RS0); reentrantFsm.update();
+    reentrantFsm.transitionTo(RS1); reentrantFsm.update();
+    // rs1Entry ran and set pendingState=RS2; the inTransition flag deferred it.
+    reentrantFsm.update();  // apply the deferred transition
+    CHECK(reentrantFsm.getCurrentState() == RS2);
+}
+
 int main() {
     printf("PulseHSM tests (self-transition mode = %d)\n",
            PULSEHSM_SELF_TRANSITION_FULL_REINIT);
@@ -154,6 +300,18 @@ int main() {
     test_leaf_precondition();
     test_event_payload();
     test_queue_fifo_order();
+    // initial substate
+    test_initial_substate_begin();
+    test_initial_substate_transition();
+    test_initial_substate_nested();
+    test_initial_substate_no_default();
+    test_setInitial_validates_args();
+    test_leaf_precondition_still_works();
+    // overflow / multi-instance / hierarchy / reentrancy
+    test_queue_overflow_returns_false();
+    test_multi_instance_isolation();
+    test_is_in_hierarchy_levels();
+    test_reentrant_transition();
 
     if (g_failures == 0) { printf("ALL PASSED\n"); return 0; }
     printf("%d CHECK(s) FAILED\n", g_failures);

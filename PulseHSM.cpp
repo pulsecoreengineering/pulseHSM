@@ -34,6 +34,7 @@ int PulseHSM::addState(const char* name, Action update, Action entry, Action exi
     s.timeoutNext = timeoutNext;
     s.onEvent = onEvent;
     s.parent = (int8_t)parent;
+    s.initialChild = -1;
     return stateCount++;
 }
 
@@ -43,17 +44,33 @@ bool PulseHSM::_isLeaf(int state) const {
     return true;
 }
 
+bool PulseHSM::setInitial(int parent, int child) {
+    if (parent < 0 || parent >= stateCount) return false;
+    if (child < 0 || child >= stateCount) return false;
+    if (states[child].parent != (int8_t)parent) return false;
+    states[parent].initialChild = (int8_t)child;
+    return true;
+}
+
+int PulseHSM::_resolveEntry(int s) const {
+    int guard = 0;
+    while (s >= 0 && states[s].initialChild != -1 && guard++ <= PULSEHSM_MAX_DEPTH)
+        s = states[s].initialChild;
+    return s;
+}
+
 bool PulseHSM::begin(int startState) {
     if (startState < 0 || startState >= stateCount) return false;
-    if (!_isLeaf(startState)) return false;   // composite start states are unsupported
+    int leaf = _resolveEntry(startState);
+    if (!_isLeaf(leaf)) return false;   // composite with no initial substate set
     pendingState = -1;
     previousState = -1;
-    currentState = startState;
+    currentState = leaf;
     entryTime = millis();
     evtHead = 0;
     evtCount = 0;
     inTransition = false;
-    _callEntryChain(startState);
+    _callEntryChain(leaf);
     return true;
 }
 
@@ -91,15 +108,16 @@ void PulseHSM::transitionTo(int newState) {
     if (newState >= 0 && newState < stateCount) pendingState = newState;
 }
 
-void PulseHSM::sendEvent(uint8_t event, int32_t data) {
+bool PulseHSM::sendEvent(uint8_t event, int32_t data) {
     PulseHSMCritical crit;
     if (evtCount < PULSEHSM_MAX_EVENTS) {
         uint8_t slot = (uint8_t)((evtHead + evtCount) & (PULSEHSM_MAX_EVENTS - 1));
         evtQueue[slot] = event;
         evtData[slot] = data;
         evtCount++;
+        return true;
     }
-    // else: queue full — event dropped (bounded, no dynamic allocation).
+    return false;   // queue full — event dropped (bounded, no dynamic allocation)
 }
 
 int PulseHSM::getCurrentState() const { return currentState; }
@@ -168,14 +186,15 @@ void PulseHSM::_runUpdates() {
 void PulseHSM::_executeTransition(int toState) {
     if (inTransition) return;
     inTransition = true;
+    int target = _resolveEntry(toState);
     int from = currentState;
-    int lca = _findLCA(from, toState);
+    int lca = _findLCA(from, target);
     _callExitChain(from, lca);
     previousState = currentState;
-    currentState = toState;
+    currentState = target;
     pendingState = -1;
     entryTime = millis();
-    _callEntryChain(toState, lca);
+    _callEntryChain(target, lca);
     inTransition = false;
 }
 
