@@ -1,5 +1,5 @@
 - **Getting Started**
-  - [Home](/)
+  - [Home](https://pulsecoreengineering.github.io/)
   - [Concepts](guide/concepts.md)
   - [Quick Start](guide/quickstart.md)
   - [Initial Substates](guide/initial-substates.md)
