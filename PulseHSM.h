@@ -49,7 +49,14 @@ class PulseHSMCritical {
   public:
     PulseHSMCritical() : s_(SREG) { cli(); }
     ~PulseHSMCritical() { SREG = s_; }
-#elif defined(__CORTEX_M) || defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_RP2040) || \
+#elif defined(ARDUINO_ARCH_RP2040)
+    // arduino-pico (earlephilhower) exposes Pico SDK save/restore helpers but
+    // does NOT include CMSIS headers, so __get_PRIMASK / __disable_irq are absent.
+    uint32_t s_;
+  public:
+    PulseHSMCritical() : s_(save_and_disable_interrupts()) {}
+    ~PulseHSMCritical() { restore_interrupts(s_); }
+#elif defined(__CORTEX_M) || defined(ARDUINO_ARCH_SAMD) || \
       defined(ARDUINO_ARCH_STM32) || defined(ARDUINO_ARCH_NRF52) || defined(TEENSYDUINO)
     uint32_t pri_;
   public:
