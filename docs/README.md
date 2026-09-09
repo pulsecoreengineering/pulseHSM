@@ -1,12 +1,7 @@
-# PulseHSM <small>v1.2.0</small>
+# PulseHSM
 
 **Tiny hierarchical state machine for embedded systems.**  
-No heap. No dynamic allocation. Interrupt-safe.
-
-[![Arduino Library](https://img.shields.io/badge/Arduino-Library-teal?logo=arduino)](https://www.arduino.cc/reference/en/libraries/pulsehsm/)
-[![PlatformIO](https://img.shields.io/badge/PlatformIO-Registry-orange?logo=platformio)](https://registry.platformio.org/libraries/pulsecoreengineering/PulseHSM)
-[![GitHub](https://img.shields.io/github/v/release/pulsecoreengineering/pulseHSM?label=Release)](https://github.com/pulsecoreengineering/pulseHSM/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue)](https://github.com/pulsecoreengineering/pulseHSM/blob/main/LICENSE)
+No heap. No dynamic allocation. Interrupt-safe. Runs on AVR, ESP32, STM32, RP2040, SAMD.
 
 ---
 
@@ -24,44 +19,19 @@ that model to microcontrollers with **zero heap use and a fully static footprint
 #include "PulseHSM.h"
 PulseHSM fsm;
 
+// RUNNING is a superstate. Its E-stop handler fires for every substate.
+// Entering RUNNING automatically lands in STARTING (its initial substate).
 void setup() {
-  int RUNNING  = fsm.addState("RUNNING",  nullptr, nullptr,    nullptr, 0,    -1, onEstop,  -1);
-  int STARTING = fsm.addState("STARTING", nullptr, startEntry, nullptr, 3000, -1, nullptr,  RUNNING);
-  int OPERATING= fsm.addState("OPERATING",nullptr, opEntry,    nullptr, 0,    -1, nullptr,  RUNNING);
-  int FAULT    = fsm.addState("FAULT",    nullptr, faultEntry, nullptr, 0,    -1, nullptr,  -1);
+  int RUNNING  = fsm.addState("RUNNING",  nullptr, nullptr, nullptr, 0, -1, onEstop,   -1);
+  int STARTING = fsm.addState("STARTING", nullptr, startEntry, nullptr, 3000, -1, nullptr, RUNNING);
+  int OPERATING= fsm.addState("OPERATING",nullptr, opEntry,    nullptr, 0,    -1, nullptr, RUNNING);
+  int FAULT    = fsm.addState("FAULT",    nullptr, faultEntry, nullptr, 0,    -1, nullptr, -1);
 
-  fsm.setInitial(RUNNING, STARTING);   // entering RUNNING lands in STARTING
-  fsm.begin(RUNNING);                  // → STARTING
+  fsm.setInitial(RUNNING, STARTING);    // entering RUNNING lands in STARTING
+  fsm.begin(RUNNING);                   // → STARTING
 }
 void loop() { fsm.update(); }
 ```
-
----
-
-## Installation
-
-### Arduino IDE
-
-**Library Manager (recommended)**  
-Open *Sketch → Include Library → Manage Libraries…*, search **PulseHSM**, click Install.
-
-**Manual**  
-Download the [latest release](https://github.com/pulsecoreengineering/pulseHSM/releases), unzip into your `Arduino/libraries/` folder, restart the IDE.
-
-### PlatformIO
-
-```ini
-; platformio.ini
-[env:myboard]
-lib_deps = pulsecoreengineering/PulseHSM @ ^1.2.0
-```
-
-Or install from the CLI:
-```bash
-pio lib install "pulsecoreengineering/PulseHSM"
-```
-
----
 
 ## Features at a glance
 
@@ -106,12 +76,7 @@ Each additional state adds ~16 bytes of RAM. Raising `PULSEHSM_MAX_EVENTS` adds 
 - [Concepts](guide/concepts.md) — what an HSM is and how PulseHSM models it
 - [Quick Start](guide/quickstart.md) — from a two-state blinker to a full hierarchy in minutes
 - [Initial Substates](guide/initial-substates.md) — the feature that makes a hierarchy feel like a hierarchy
-- [Events & Payloads](guide/events.md) — the interrupt-safe event queue
-- [Configuration](guide/configuration.md) — compile-time overrides
 - [API Reference](api/reference.md) — every method documented
-- [FAQ](guide/faq.md) — common questions
-
----
 
 ## Use cases
 
