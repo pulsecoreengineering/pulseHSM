@@ -16,6 +16,12 @@
 
 #include "PulseHSM.h"
 
+// ESP32 Arduino core 3.x does not define LED_BUILTIN on all boards.
+// Change this to the correct GPIO number for your board.
+#ifndef LED_BUILTIN
+  #define LED_BUILTIN 2
+#endif
+
 PulseHSM fsm;
 
 void ledOn()  { digitalWrite(LED_BUILTIN, HIGH); }
