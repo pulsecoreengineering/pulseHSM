@@ -17,3 +17,7 @@
   - [Industrial Machine Controller](/use-cases/machine-controller.md)
   - [UI Menu System](/use-cases/menu-system.md)
   - [Serial Protocol Parser](/use-cases/protocol-parser.md)
+
+- **Reference**
+  - [FAQ](/guide/faq.md)
+  - [Changelog](/guide/changelog.md)
