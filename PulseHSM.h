@@ -49,7 +49,14 @@ class PulseHSMCritical {
   public:
     PulseHSMCritical() : s_(SREG) { cli(); }
     ~PulseHSMCritical() { SREG = s_; }
-#elif defined(__CORTEX_M) || defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_RP2040) || \
+#elif defined(ARDUINO_ARCH_RP2040)
+    // arduino-pico (earlephilhower) exposes Pico SDK save/restore helpers but
+    // does NOT include CMSIS headers, so __get_PRIMASK / __disable_irq are absent.
+    uint32_t s_;
+  public:
+    PulseHSMCritical() : s_(save_and_disable_interrupts()) {}
+    ~PulseHSMCritical() { restore_interrupts(s_); }
+#elif defined(__CORTEX_M) || defined(ARDUINO_ARCH_SAMD) || \
       defined(ARDUINO_ARCH_STM32) || defined(ARDUINO_ARCH_NRF52) || defined(TEENSYDUINO)
     uint32_t pri_;
   public:
@@ -83,10 +90,15 @@ public:
                  EventCb onEvent,
                  int parent = -1);
 
-    // Start the machine.
-    // PRECONDITION: startState must be a LEAF (no other state names it as parent).
-    // PulseHSM has no default/initial-substate mechanism, so entering a composite
-    // state is undefined. Returns false if startState is invalid or not a leaf.
+    // Mark `child` as the default substate entered when `parent` is targeted.
+    // `child` must be a direct child of `parent`. Returns false on bad indices.
+    // Once set, transitionTo(parent) and begin(parent) resolve to the deepest
+    // initial leaf before entering.
+    bool setInitial(int parent, int child);
+
+    // Start the machine. startState may be a leaf or a composite that has an
+    // initial substate set (recursively). Returns false if startState is invalid
+    // or is a composite with no initial substate configured.
     bool begin(int startState);
 
     // Run the scheduler — call once per loop().
@@ -97,8 +109,8 @@ public:
 
     // Enqueue an event (interrupt-safe ring buffer).
     // Optional int32 payload — read it inside an onEvent handler via getEventData().
-    // sendEvent(EVT) still works (data defaults to 0).
-    void sendEvent(uint8_t event, int32_t data = 0);
+    // Returns true if the event was queued, false if the queue was full (event dropped).
+    bool sendEvent(uint8_t event, int32_t data = 0);
 
     // Getters
     int getCurrentState() const;
@@ -124,6 +136,7 @@ private:
         int timeoutNext;
         EventCb onEvent;
         int8_t parent;
+        int8_t initialChild;   // -1 = leaf / no default child
     };
     State states[PULSEHSM_MAX_STATES];
     int stateCount;
@@ -145,6 +158,7 @@ private:
     void _executeTransition(int toState);
     int  _findLCA(int a, int b) const;
     bool _isLeaf(int state) const;
+    int  _resolveEntry(int s) const;   // walk initialChild chain to deepest leaf
 };
 
 #endif // PULSE_HSM_H
