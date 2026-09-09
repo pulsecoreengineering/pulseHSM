@@ -7,6 +7,10 @@
 
 #include "PulseHSM.h"
 
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2
+#endif
+
 // State indices are assigned by addState() in call order starting at 0, so we
 // can name them up front and use them as forward references for timeoutNext.
 enum { ST_ON, ST_OFF, ST_LATCHED };
