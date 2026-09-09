@@ -45,6 +45,32 @@ void loop() { fsm.update(); }
 | Self-transitions | Lightweight (timer reset) or full reinit mode |
 | Zero heap | Everything sized at compile time with `#define` overrides |
 
+---
+
+## Memory footprint
+
+Defaults (`PULSEHSM_MAX_STATES 8`, `PULSEHSM_MAX_EVENTS 8`, `PULSEHSM_MAX_DEPTH 4`):
+
+| MCU | Flash (approx.) | RAM (approx.) |
+|---|---|---|
+| AVR (ATmega328P) | ~1.1 KB | ~160 B |
+| ARM Cortex-M (ESP32, RP2040, STM32, SAMD) | ~1.4 KB | ~200 B |
+
+Each additional state adds ~16 bytes of RAM. Raising `PULSEHSM_MAX_EVENTS` adds 5 bytes per slot.
+
+---
+
+## Limitations
+
+- **State count**: `PULSEHSM_MAX_STATES` defaults to 8 (max 127). Raise it with a `#define` before the include.
+- **Hierarchy depth**: `PULSEHSM_MAX_DEPTH` defaults to 4 ancestors per leaf. Deeper nesting requires overriding.
+- **Dual-core (RP2040, ESP32)**: `sendEvent()` is safe when called from an ISR **on the same core** as `update()`. Cross-core producers need additional user-side synchronisation (a mutex or memory barrier).
+- **`millis()` rollover**: handled — `getStateElapsed()` and timeout logic use subtraction, so they survive the 49-day rollover correctly.
+- **No dynamic state removal**: states are registered once in `setup()` and exist for the lifetime of the program. This is intentional — it keeps the footprint static.
+- **Single active leaf**: PulseHSM is a single-thread HSM. It does not support orthogonal (parallel) regions.
+
+---
+
 ## Get started
 
 - [Concepts](guide/concepts.md) — what an HSM is and how PulseHSM models it
