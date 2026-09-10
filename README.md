@@ -1,3 +1,9 @@
+![CI](https://img.shields.io/github/actions/workflow/status/pulsecoreengineering/pulseHSM/ci.yml?branch=main&label=CI)
+![Stars](https://img.shields.io/github/stars/pulsecoreengineering/pulseHSM?style=flat)
+![License](https://img.shields.io/github/license/pulsecoreengineering/pulseHSM)
+![PlatformIO](https://img.shields.io/badge/PlatformIO-Registry-orange)
+![Arduino](https://img.shields.io/badge/Arduino-Library_Manager-teal)
+![Discussions](https://img.shields.io/github/discussions/pulsecoreengineering/pulseHSM)
 # PulseHSM
 
 A tiny hierarchical state machine (HSM) for embedded systems. No heap, no dynamic
