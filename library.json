@@ -1,0 +1,22 @@
+{
+  "name": "PulseHSM",
+  "version": "1.2.1",
+  "description": "Tiny hierarchical state machine for embedded C++ — nested states, event bubbling, and timed transitions in a single header.",
+  "keywords": ["hsm", "state-machine", "embedded", "finite-state-machine", "arduino", "avr", "esp32", "rp2040", "stm32", "samd"],
+  "authors": [
+    {
+      "name": "Alex Gabriel Malisa",
+      "email": "alex.malisa@pulsecoreengineering.com",
+      "maintainer": true
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pulsecoreengineering/pulseHSM"
+  },
+  "homepage": "https://pulsecoreengineering.github.io/pulseHSM/",
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": "PulseHSM.h"
+}

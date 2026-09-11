@@ -1,0 +1,27 @@
+# Compiled objects / binaries
+*.o
+*.a
+*.elf
+*.hex
+*.bin
+*.map
+
+# Local test builds (test/run_tests.sh writes to /tmp, but just in case)
+/test/*.out
+/test/pulsehsm_t0
+/test/pulsehsm_t1
+a.out
+
+# Arduino / PlatformIO build output
+build/
+.build/
+.pio/
+*.pio-nightly
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
