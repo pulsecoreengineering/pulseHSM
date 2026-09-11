@@ -101,7 +101,7 @@ int addState(const char* name,
              unsigned long timeoutMs,  // 0 = no timeout
              int         timeoutNext,  // state to go to on timeout (-1 = none)
              EventCb     onEvent,      // event handler (may be nullptr)
-             int         parent = -1); // parent state index
+             int         parent = -1); // parent state index.
 
 // Mark `child` as the default substate of `parent`.
 // child must be a direct child of parent. Returns false on bad indices.
