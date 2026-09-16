@@ -50,7 +50,7 @@ Use a short imperative subject line (≤ 72 chars), e.g.:
 
 ```
 fix: initialChild defaults to -1 instead of 0
-feat: add setInitial() for composite state resolution
+feat: add getDroppedEvents() diagnostic to PulseHSM
 docs: add Serial Protocol Parser use case
 ```
 

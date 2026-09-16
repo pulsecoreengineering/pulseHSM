@@ -1,7 +1,7 @@
 # UI Menu System
 
 **Demonstrates:** deep nesting, back-navigation with `getPreviousState()`, composite
-entry via `setInitial`, `isInHierarchy()` for breadcrumb display, event payloads
+entry via `initialChild`, `isInHierarchy()` for breadcrumb display, event payloads
 for encoder input.
 
 ## The problem
@@ -33,16 +33,16 @@ ROOT_MENU             (initial screen)
 ## Full example
 
 ```cpp
-#define PULSEHSM_MAX_STATES 16
 #define PULSEHSM_MAX_EVENTS 16
 #include "PulseHSM.h"
 
-PulseHSM fsm;
-
 // ---- State indices -------------------------------------------------------
-int ST_ROOT, ST_MAIN_MENU, ST_SETTINGS_MENU;
-int ST_DISPLAY_SETTINGS, ST_AUDIO_SETTINGS;
-int ST_INFO_SCREEN, ST_SCREENSAVER;
+enum StateID : int8_t {
+    ST_ROOT = 0, ST_SCREENSAVER, ST_MAIN_MENU,
+    ST_INFO_SCREEN, ST_SETTINGS_MENU,
+    ST_DISPLAY_SETTINGS, ST_AUDIO_SETTINGS,
+    ST_COUNT
+};
 
 // ---- Events -------------------------------------------------------------
 enum Events : uint8_t {
@@ -213,25 +213,34 @@ void printBreadcrumb() {
   Serial.println();
 }
 
+// ---- Forward declarations ------------------------------------------------
+bool rootEvent(uint8_t e);
+void screensaver_entry();   bool screensaver_event(uint8_t e);
+void mainMenu_entry();      bool mainMenu_event(uint8_t e);
+void infoScreen_entry();    bool infoScreen_event(uint8_t e);
+void settingsMenu_entry();  bool settingsMenu_event(uint8_t e);
+void displaySettings_entry(); bool displaySettings_event(uint8_t e);
+void audioSettings_entry();   bool audioSettings_event(uint8_t e);
+
+// ---- State table ---------------------------------------------------------
+//                                          name       upd  entry                  exit  ms      next  event                  parent           initChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_ROOT]             = { PULSEHSM_NAME("ROOT"),    nullptr, nullptr,               nullptr, 30000, ST_SCREENSAVER, rootEvent,           -1,              ST_MAIN_MENU          },
+    [ST_SCREENSAVER]      = { PULSEHSM_NAME("SCR"),     nullptr, screensaver_entry,     nullptr, 0,     -1,             screensaver_event,   ST_ROOT,         -1                    },
+    [ST_MAIN_MENU]        = { PULSEHSM_NAME("MAIN"),    nullptr, mainMenu_entry,        nullptr, 0,     -1,             mainMenu_event,      ST_ROOT,         ST_SETTINGS_MENU      },
+    [ST_INFO_SCREEN]      = { PULSEHSM_NAME("INFO"),    nullptr, infoScreen_entry,      nullptr, 0,     -1,             infoScreen_event,    ST_MAIN_MENU,    -1                    },
+    [ST_SETTINGS_MENU]    = { PULSEHSM_NAME("SETTINGS"),nullptr, settingsMenu_entry,    nullptr, 0,     -1,             settingsMenu_event,  ST_MAIN_MENU,    ST_DISPLAY_SETTINGS   },
+    [ST_DISPLAY_SETTINGS] = { PULSEHSM_NAME("DISPLAY"), nullptr, displaySettings_entry, nullptr, 0,     -1,             displaySettings_event,ST_SETTINGS_MENU,-1                  },
+    [ST_AUDIO_SETTINGS]   = { PULSEHSM_NAME("AUDIO"),   nullptr, audioSettings_entry,   nullptr, 0,     -1,             audioSettings_event, ST_SETTINGS_MENU,-1                   },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
 // ---- setup / loop -------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
-  // Parents must be added before children
-  ST_ROOT          = fsm.addState("ROOT",     nullptr, nullptr,               nullptr, 30000, -1,          rootEvent,            -1);
-  ST_SCREENSAVER   = fsm.addState("SCR",      nullptr, screensaver_entry,     nullptr, 0,     -1,          screensaver_event,    ST_ROOT);
-  ST_MAIN_MENU     = fsm.addState("MAIN",     nullptr, mainMenu_entry,        nullptr, 0,     -1,          mainMenu_event,       ST_ROOT);
-  ST_INFO_SCREEN   = fsm.addState("INFO",     nullptr, infoScreen_entry,      nullptr, 0,     -1,          infoScreen_event,     ST_MAIN_MENU);
-  ST_SETTINGS_MENU = fsm.addState("SETTINGS", nullptr, settingsMenu_entry,    nullptr, 0,     -1,          settingsMenu_event,   ST_MAIN_MENU);
-  ST_DISPLAY_SETTINGS = fsm.addState("DISPLAY", nullptr, displaySettings_entry, nullptr, 0,   -1, displaySettings_event, ST_SETTINGS_MENU);
-  ST_AUDIO_SETTINGS   = fsm.addState("AUDIO",   nullptr, audioSettings_entry,   nullptr, 0,   -1, audioSettings_event,   ST_SETTINGS_MENU);
-
-  // Wire initial substates
-  fsm.setInitial(ST_ROOT,          ST_MAIN_MENU);
-  fsm.setInitial(ST_MAIN_MENU,     ST_SETTINGS_MENU);  // not used directly, but safe to set
-  fsm.setInitial(ST_SETTINGS_MENU, ST_DISPLAY_SETTINGS);
-
-  fsm.begin(ST_ROOT);   // → MAIN_MENU (ROOT's initial) → leaf
+  fsm.begin(ST_ROOT);   // → MAIN_MENU (initialChild) → SETTINGS_MENU → DISPLAY_SETTINGS
 }
 
 void loop() {
@@ -262,7 +271,7 @@ Alternatively, set `timeoutNext = ST_SCREENSAVER` directly and skip the handler.
 bubbles to `SETTINGS_MENU`, which handles it and transitions to `MAIN_MENU`.
 No per-leaf back-target tracking needed.
 
-**`setInitial` on `SETTINGS_MENU`**  
+**`initialChild` on `SETTINGS_MENU`**  
 `transitionTo(ST_SETTINGS_MENU)` resolves to `DISPLAY_SETTINGS` automatically.
 Every entry into Settings always starts at the first item — consistent UX with
 zero extra code.

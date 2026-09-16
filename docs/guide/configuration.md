@@ -5,21 +5,6 @@ All configuration is done with `#define` before `#include "PulseHSM.h"`, or via
 
 ## Macros
 
-### `PULSEHSM_MAX_STATES`
-
-**Default:** `8` | **Range:** 1–127
-
-The maximum number of states a single `PulseHSM` instance can hold. State indices
-are stored as `int8_t`, so the upper bound is 127.
-
-```cpp
-#define PULSEHSM_MAX_STATES 32
-#include "PulseHSM.h"
-```
-
-Memory cost: each state is a `State` struct (~30–40 bytes on 32-bit platforms,
-less on AVR). For 32 states on a 32-bit MCU, expect roughly 1 KB.
-
 ### `PULSEHSM_MAX_EVENTS`
 
 **Default:** `8` | **Constraint:** must be a power of two
@@ -39,8 +24,9 @@ The ring buffer depth. The queue takes `MAX_EVENTS × 5` bytes
 **Default:** `4` | **Minimum:** 1
 
 The maximum number of **ancestors** a leaf may have. A leaf at depth 4 means: leaf
-→ parent → grandparent → great-grandparent → root (4 ancestors). `addState()`
-returns `-1` if adding a state would exceed this depth.
+→ parent → grandparent → great-grandparent → root (4 ancestors).
+`PULSEHSM_VALIDATE_TABLE` raises a compiler error if any state in the table would
+exceed this depth.
 
 The depth also sizes stack arrays used internally during entry/exit chain traversal
 (`int8_t path[PULSEHSM_MAX_DEPTH + 1]`), so higher values use a bit more stack.
@@ -67,6 +53,34 @@ that state.
 
 The `ConnectionRetry` example demonstrates both modes.
 
+### `PULSEHSM_NAMES`
+
+**Default:** `1`
+
+Set to `0` to strip every state-name string from the binary. Useful on very
+constrained AVR parts (2 KB SRAM). When `PULSEHSM_NAMES=0`, `getCurrentName()`,
+`getStateName()`, and `getPreviousName()` return `""`.
+
+```cpp
+#define PULSEHSM_NAMES 0   // strip all name strings
+```
+
+### `PULSEHSM_TABLE`
+
+Placement macro applied to `constexpr StaticState` array declarations. Expands to
+`PROGMEM` on AVR (keeps the table in flash), empty on everything else. Always apply
+it to your table definition:
+
+```cpp
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = { ... };
+```
+
+## State count
+
+There is no `PULSEHSM_MAX_STATES` macro. The number of states is the element count
+of your table (`ST_COUNT` in the enum). State indices are stored as `int8_t`, so the
+maximum is 127 states per instance.
+
 ## Per-sketch overrides
 
 Because the macros are `#ifndef`-guarded in `PulseHSM.h`, defining them before
@@ -74,7 +88,6 @@ the include wins:
 
 ```cpp
 // At the top of your .ino or in a config header:
-#define PULSEHSM_MAX_STATES  24
 #define PULSEHSM_MAX_EVENTS  16
 #define PULSEHSM_MAX_DEPTH    5
 #include "PulseHSM.h"
@@ -82,12 +95,11 @@ the include wins:
 
 ## Multiple machines
 
-Each `PulseHSM` instance is independent. If you have two machines in the same
-sketch and they need different capacities, you currently cannot give them different
-`MAX_STATES` values (the macros are global). Size for the larger machine. They do
-not share any state.
+Each `PulseHSM` instance is fully independent — different tables, different state
+counts, and separate event queues. `PULSEHSM_MAX_EVENTS` and `PULSEHSM_MAX_DEPTH`
+are global and apply to every instance.
 
 ```cpp
-PulseHSM motorFsm;    // uses shared MAX_STATES / MAX_EVENTS
-PulseHSM networkFsm;
+PulseHSM motorFsm(MOTOR_TABLE, MOTOR_COUNT);
+PulseHSM networkFsm(NET_TABLE, NET_COUNT);
 ```

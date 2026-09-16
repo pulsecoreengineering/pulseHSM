@@ -10,7 +10,7 @@ designed to be adapted directly to a project.
 | Hierarchy + shared event handling + initial substates | [Vending Machine](vending-machine.md) |
 | Timed retries, event payloads, state-dependent logic | [Device Connection Manager](device-manager.md) |
 | Safety-critical E-stop at superstate + complex hierarchy | [Industrial Machine Controller](machine-controller.md) |
-| Deep nesting, back-navigation, composite entry via setInitial | [UI Menu System](menu-system.md) |
+| Deep nesting, back-navigation, composite entry via `initialChild` | [UI Menu System](menu-system.md) |
 | ISR-safe byte stream parsing, timeout reset | [Serial Protocol Parser](protocol-parser.md) |
 
 ## PulseHSM features by example
@@ -18,7 +18,7 @@ designed to be adapted directly to a project.
 | Feature | Vending | Device Mgr | Machine Ctrl | Menu | Protocol |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Hierarchy / superstates | ✓ | ✓ | ✓ | ✓ | — |
-| `setInitial` | ✓ | ✓ | ✓ | ✓ | — |
+| `initialChild` | ✓ | ✓ | ✓ | ✓ | — |
 | Event payloads | ✓ | ✓ | — | ✓ | ✓ |
 | Event bubbling | ✓ | — | ✓ | ✓ | — |
 | Timed transitions | — | ✓ | ✓ | — | ✓ |
@@ -76,5 +76,6 @@ received its expected event in time, automatically recover:
 
 ```cpp
 // WAITING_FOR_ACK times out after 2 s → RETRY
-fsm.addState("WAITING_ACK", nullptr, sendPacket, nullptr, 2000, ST_RETRY, nullptr, parent);
+// In the StaticState table:
+[ST_WAITING_ACK] = { PULSEHSM_NAME("WAITING_ACK"), nullptr, sendPacket, nullptr, 2000, ST_RETRY, nullptr, parent, -1 },
 ```

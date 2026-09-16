@@ -34,8 +34,8 @@ bool myHandler(uint8_t e) {
 }
 ```
 
-Pass it to `addState()` as the `onEvent` parameter. A state may have `nullptr`
-for its handler — the event bubbles up automatically.
+Assign it to the `onEvent` field in the state's `StaticState` row. A state may
+have `nullptr` for its handler — the event bubbles up automatically.
 
 ## Reading the payload
 

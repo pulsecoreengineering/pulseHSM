@@ -17,20 +17,35 @@ that model to microcontrollers with **zero heap use and a fully static footprint
 
 ```cpp
 #include "PulseHSM.h"
-PulseHSM fsm;
 
 // RUNNING is a superstate. Its E-stop handler fires for every substate.
 // Entering RUNNING automatically lands in STARTING (its initial substate).
-void setup() {
-  int RUNNING  = fsm.addState("RUNNING",  nullptr, nullptr, nullptr, 0, -1, onEstop,   -1);
-  int STARTING = fsm.addState("STARTING", nullptr, startEntry, nullptr, 3000, -1, nullptr, RUNNING);
-  int OPERATING= fsm.addState("OPERATING",nullptr, opEntry,    nullptr, 0,    -1, nullptr, RUNNING);
-  int FAULT    = fsm.addState("FAULT",    nullptr, faultEntry, nullptr, 0,    -1, nullptr, -1);
 
-  fsm.setInitial(RUNNING, STARTING);    // entering RUNNING lands in STARTING
-  fsm.begin(RUNNING);                   // → STARTING
+enum StateID : int8_t { ST_RUNNING = 0, ST_STARTING, ST_OPERATING, ST_FAULT, ST_COUNT };
+
+void startEntry(); void opEntry(); void faultEntry();
+bool onEstop(uint8_t e);
+
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_RUNNING]   = { PULSEHSM_NAME("RUNNING"),   nullptr, nullptr,    nullptr, 0, -1, onEstop,  -1,         ST_STARTING },
+    [ST_STARTING]  = { PULSEHSM_NAME("STARTING"),  nullptr, startEntry, nullptr, 3000, -1, nullptr, ST_RUNNING, -1 },
+    [ST_OPERATING] = { PULSEHSM_NAME("OPERATING"), nullptr, opEntry,    nullptr, 0, -1, nullptr, ST_RUNNING,   -1 },
+    [ST_FAULT]     = { PULSEHSM_NAME("FAULT"),     nullptr, faultEntry, nullptr, 0, -1, nullptr, -1,           -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
+void startEntry() { Serial.println("STARTING…"); }
+void opEntry()    { Serial.println("OPERATING"); }
+void faultEntry() { Serial.println("FAULT"); }
+bool onEstop(uint8_t e) {
+    if (e == 1) { fsm.transitionTo(ST_FAULT); return true; }
+    return false;
 }
-void loop() { fsm.update(); }
+
+void setup() { Serial.begin(115200); fsm.begin(ST_RUNNING); }  // → STARTING
+void loop()  { fsm.update(); }
 ```
 
 ## Features at a glance
@@ -38,36 +53,44 @@ void loop() { fsm.update(); }
 | Feature | Detail |
 |---|---|
 | Hierarchical states | `entry` / `exit` / `update` on superstates and leaves |
-| Initial substates | `setInitial(parent, child)` — target a composite and land in its default leaf |
+| Initial substates | `initialChild` field — target a composite and land in its default leaf |
 | Event queue | Fixed ring buffer, interrupt-safe, optional `int32` payload |
 | Event bubbling | Unhandled events walk up to the parent automatically |
 | Timed transitions | `timeoutMs` + `timeoutNext` per state |
 | Self-transitions | Lightweight (timer reset) or full reinit mode |
-| Zero heap | Everything sized at compile time with `#define` overrides |
+| Flash-resident tables | `PULSEHSM_TABLE` keeps the state table in AVR flash (PROGMEM) |
+| Compile-time validation | `PULSEHSM_VALIDATE_TABLE` catches wiring errors before upload |
+| Zero heap | Everything sized at compile time |
 
 ---
 
 ## Memory footprint
 
-Defaults (`PULSEHSM_MAX_STATES 8`, `PULSEHSM_MAX_EVENTS 8`, `PULSEHSM_MAX_DEPTH 4`):
+Defaults (`PULSEHSM_MAX_EVENTS 8`, `PULSEHSM_MAX_DEPTH 4`):
 
 | MCU | Flash (approx.) | RAM (approx.) |
 |---|---|---|
-| AVR (ATmega328P) | ~1.1 KB | ~160 B |
-| ARM Cortex-M (ESP32, RP2040, STM32, SAMD) | ~1.4 KB | ~200 B |
+| AVR (ATmega328P) | ~1.1 KB | ~120 B |
+| ARM Cortex-M (ESP32, RP2040, STM32, SAMD) | ~1.4 KB | ~160 B |
 
-Each additional state adds ~16 bytes of RAM. Raising `PULSEHSM_MAX_EVENTS` adds 5 bytes per slot.
+The `StaticState` table lives in flash on AVR (via `PULSEHSM_TABLE = PROGMEM`),
+adding zero RAM overhead per state. Raising `PULSEHSM_MAX_EVENTS` adds 5 bytes
+of RAM per slot.
 
 ---
 
 ## Limitations
 
-- **State count**: `PULSEHSM_MAX_STATES` defaults to 8 (max 127). Raise it with a `#define` before the include.
-- **Hierarchy depth**: `PULSEHSM_MAX_DEPTH` defaults to 4 ancestors per leaf. Deeper nesting requires overriding.
-- **Dual-core (RP2040, ESP32)**: `sendEvent()` is safe when called from an ISR **on the same core** as `update()`. Cross-core producers need additional user-side synchronisation (a mutex or memory barrier).
-- **`millis()` rollover**: handled — `getStateElapsed()` and timeout logic use subtraction, so they survive the 49-day rollover correctly.
-- **No dynamic state removal**: states are registered once in `setup()` and exist for the lifetime of the program. This is intentional — it keeps the footprint static.
-- **Single active leaf**: PulseHSM is a single-thread HSM. It does not support orthogonal (parallel) regions.
+- **State count**: up to 127 states per instance (indices are `int8_t`). The count
+  is the element count `N` of your `StaticState TABLE[N]` — no macro needed.
+- **Hierarchy depth**: `PULSEHSM_MAX_DEPTH` defaults to 4 ancestors per leaf. Override if needed.
+- **Dual-core (RP2040, ESP32)**: `sendEvent()` is safe when called from an ISR **on
+  the same core** as `update()`. Cross-core producers need additional user-side
+  synchronisation (a mutex or memory barrier).
+- **`millis()` rollover**: handled — timeout logic uses unsigned subtraction, surviving
+  the 49-day rollover.
+- **Single active leaf**: PulseHSM is a single-thread HSM. Orthogonal (parallel)
+  regions are not supported.
 
 ---
 

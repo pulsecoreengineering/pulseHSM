@@ -49,15 +49,16 @@ exited or re-entered.
 ### Initial substates
 
 A composite state can designate one of its direct children as its **initial
-substate** — the default child entered when the composite is targeted:
+substate** — the default child entered when the composite is targeted. Set the
+`initialChild` field in the composite's `StaticState` row:
 
 ```cpp
-// P -> { A, B };  A is the initial substate of P
-fsm.setInitial(P, A);
-fsm.transitionTo(P);   // lands in A, running P's entry then A's entry
+// P -> { A, B };  A is the initial substate of P — set in the table:
+// [ST_P] = { ..., /*initialChild=*/ ST_A }
+fsm.transitionTo(ST_P);   // lands in A, running P's entry then A's entry
 ```
 
-Resolution is recursive: if A is also a composite with its own initial child,
+Resolution is recursive: if A is also a composite with its own `initialChild`,
 the machine descends all the way to the deepest initial leaf.
 
 ### Events
@@ -79,49 +80,46 @@ for that one state; ancestors are untouched.
 
 | Macro | Default | Notes |
 |---|---|---|
-| `PULSEHSM_MAX_STATES` | 8 | 1..127 |
 | `PULSEHSM_MAX_EVENTS` | 8 | **must be a power of two** |
 | `PULSEHSM_MAX_DEPTH` | 4 | max ancestors per leaf |
 | `PULSEHSM_SELF_TRANSITION_FULL_REINIT` | 0 | 0 = timer reset only; 1 = exit()+entry() for that state |
+| `PULSEHSM_NAMES` | 1 | set to `0` to strip all name strings from the binary |
 
-Invalid values fail at compile time with a clear message.
+State count is determined by the element count of your `StaticState` table — no
+`PULSEHSM_MAX_STATES` macro. Invalid values fail at compile time with a clear message.
 
 ## API reference
+
+**Define your table, validate it, then construct:**
+
+```cpp
+enum StateID : int8_t { ST_A = 0, ST_B, ST_COUNT };
+
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    //       name                    update  entry   exit  ms  next   event  parent  initialChild
+    [ST_A] = { PULSEHSM_NAME("A"), nullptr, entryA, nullptr, 0,  -1, nullptr, -1, -1 },
+    [ST_B] = { PULSEHSM_NAME("B"), nullptr, entryB, nullptr, 0,  -1, nullptr, -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+PulseHSM fsm(TABLE, ST_COUNT);
+```
+
+**Runtime methods:**
 
 ```cpp
 // ---- Setup ------------------------------------------------------------------
 
-// Add a state. Returns its index (0, 1, 2, …) or -1 on error.
-// parent = -1 for a root state. A parent must be added before its children.
-// Returns -1 if the table is full or depth would exceed PULSEHSM_MAX_DEPTH.
-int addState(const char* name,
-             Action      update,       // called every tick (may be nullptr)
-             Action      entry,        // called on entry (may be nullptr)
-             Action      exit,         // called on exit (may be nullptr)
-             unsigned long timeoutMs,  // 0 = no timeout
-             int         timeoutNext,  // state to go to on timeout (-1 = none)
-             EventCb     onEvent,      // event handler (may be nullptr)
-             int         parent = -1); // parent state index
-
-// Mark `child` as the default substate of `parent`.
-// child must be a direct child of parent. Returns false on bad indices.
-bool setInitial(int parent, int child);
-
-// Start the machine. startState may be a leaf or a composite with setInitial set.
-// Calls the full entry chain from root to startState (recursing into initial substates).
-// Returns false if startState is invalid or is a composite with no initial substate.
+// Start the machine. startState may be a leaf or a composite with initialChild set.
+// Calls the full entry chain. Returns false if startState is invalid.
 bool begin(int startState);
 
 // ---- Main loop --------------------------------------------------------------
 
-// Call once per loop(). Drains the event queue, runs update() callbacks,
-// checks timeouts, and applies any pending transition.
-void update();
+void update();  // call once per loop()
 
 // ---- Transitions & events ---------------------------------------------------
 
-// Request a transition. Applied at the end of the current update().
-// toState may be a leaf or a composite with setInitial configured.
+// Deferred transition — applied at the end of the current update().
 void transitionTo(int toState);
 
 // Enqueue an event (interrupt-safe). Returns true if queued, false if full.
@@ -129,14 +127,15 @@ bool sendEvent(uint8_t event, int32_t data = 0);
 
 // ---- Queries ----------------------------------------------------------------
 
-int          getCurrentState()  const;  // current leaf state index
-const char*  getCurrentName()   const;  // current state's name string
-const char*  getStateName(int)  const;  // name of any state by index
-unsigned long getStateElapsed() const;  // ms since last entry
-int          getPreviousState() const;  // state before last transition (-1 = none)
-const char*  getPreviousName()  const;
-int32_t      getEventData()     const;  // payload of the event being dispatched
-bool         isInHierarchy(int state) const; // true if state is current or an active ancestor
+int           getCurrentState()   const;  // current leaf state index
+const char*   getCurrentName()    const;  // current state's name string
+const char*   getStateName(int)   const;  // name of any state by index
+unsigned long getStateElapsed()   const;  // ms since last entry
+int           getPreviousState()  const;  // state before last transition (-1 = none)
+const char*   getPreviousName()   const;
+int32_t       getEventData()      const;  // payload of the event being dispatched
+uint8_t       getDroppedEvents()  const;  // sendEvent() calls dropped since begin()
+bool          isInHierarchy(int)  const;  // true if state is current or an active ancestor
 ```
 
 **Callback signatures:**
@@ -164,36 +163,48 @@ Start with `MachineControl` if you want to see why *hierarchical* matters.
 
 ## Quick start
 
-A two-state blinker (see [`examples/BlinkHSM`](examples/BlinkHSM/BlinkHSM.ino)):
+A two-state blinker (see [`examples/Blink`](examples/Blink/Blink.ino)):
 
 ```cpp
 #include "PulseHSM.h"
-enum { ST_ON, ST_OFF };
-PulseHSM fsm;
 
-void setup() {
-  fsm.addState("on",  nullptr, onEntry,  nullptr, 500, ST_OFF, nullptr, -1);
-  fsm.addState("off", nullptr, offEntry, nullptr, 500, ST_ON,  nullptr, -1);
-  fsm.begin(ST_ON);
-}
-void loop() { fsm.update(); }
+enum StateID : int8_t { ST_ON = 0, ST_OFF, ST_COUNT };
+
+void onEntry()  { digitalWrite(LED_BUILTIN, HIGH); }
+void offEntry() { digitalWrite(LED_BUILTIN, LOW);  }
+
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_ON]  = { PULSEHSM_NAME("ON"),  nullptr, onEntry,  nullptr, 500, ST_OFF, nullptr, -1, -1 },
+    [ST_OFF] = { PULSEHSM_NAME("OFF"), nullptr, offEntry, nullptr, 500, ST_ON,  nullptr, -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+PulseHSM fsm(TABLE, ST_COUNT);
+
+void setup() { pinMode(LED_BUILTIN, OUTPUT); fsm.begin(ST_ON); }
+void loop()  { fsm.update(); }
 ```
 
 A hierarchy with an initial substate:
 
 ```cpp
 #include "PulseHSM.h"
-enum { RUNNING, STARTING, PROCESSING };  // RUNNING is composite
-PulseHSM fsm;
 
-void setup() {
-  fsm.addState("RUNNING",    nullptr, nullptr, nullptr, 0, -1, runningEvent, -1);
-  fsm.addState("STARTING",   nullptr, startEntry, nullptr, 2000, PROCESSING, nullptr, RUNNING);
-  fsm.addState("PROCESSING", nullptr, procEntry,  nullptr, 0,    -1,         nullptr, RUNNING);
-  fsm.setInitial(RUNNING, STARTING);  // entering RUNNING lands in STARTING
-  fsm.begin(RUNNING);                 // resolves to STARTING
-}
-void loop() { fsm.update(); }
+enum StateID : int8_t { ST_RUNNING = 0, ST_STARTING, ST_PROCESSING, ST_COUNT };
+
+void startEntry(); void procEntry(); bool runningEvent(uint8_t e);
+
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_RUNNING]    = { PULSEHSM_NAME("RUNNING"),    nullptr, nullptr,    nullptr, 0,    -1,            runningEvent, -1,         ST_STARTING },
+    [ST_STARTING]   = { PULSEHSM_NAME("STARTING"),   nullptr, startEntry, nullptr, 2000, ST_PROCESSING, nullptr,      ST_RUNNING, -1          },
+    [ST_PROCESSING] = { PULSEHSM_NAME("PROCESSING"), nullptr, procEntry,  nullptr, 0,    -1,            nullptr,      ST_RUNNING, -1          },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+PulseHSM fsm(TABLE, ST_COUNT);
+
+// callback implementations follow (after fsm is defined) …
+
+void setup() { fsm.begin(ST_RUNNING); }  // initialChild → STARTING
+void loop()  { fsm.update(); }
 ```
 
 ## Tests

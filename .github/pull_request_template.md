@@ -21,6 +21,6 @@
 
 - [ ] No dynamic memory allocation introduced
 - [ ] No new external dependencies
-- [ ] Backward-compatible with existing `addState()` / `begin()` call sites
+- [ ] If API changes, `StaticState` fields and `PULSEHSM_VALIDATE_TABLE` remain consistent
 - [ ] `library.properties` version bumped if API changed
 - [ ] `CHANGELOG.md` updated

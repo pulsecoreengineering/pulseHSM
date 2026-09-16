@@ -29,14 +29,11 @@ COMPLETE      (frame ready; application reads it, then → IDLE)
 ## Full example
 
 ```cpp
-#define PULSEHSM_MAX_STATES 16
 #define PULSEHSM_MAX_EVENTS 32   // larger queue: bytes arrive fast
 #include "PulseHSM.h"
 
-PulseHSM parser;
-
 // ---- State indices -------------------------------------------------------
-int ST_IDLE, ST_RECEIVING, ST_VALIDATING, ST_COMPLETE;
+enum StateID : int8_t { ST_IDLE = 0, ST_RECEIVING, ST_VALIDATING, ST_COMPLETE, ST_COUNT };
 
 // ---- Events -------------------------------------------------------------
 enum Events : uint8_t {
@@ -179,15 +176,27 @@ void receiving_update() {
 // On RP2040 (irq callback registered via Serial1.setFIFOSize / irq_set_exclusive_handler):
 //   void uart_irq() { while (uart_is_readable(uart0)) parser.sendEvent(EVT_BYTE, uart_getc(uart0)); }
 
+// ---- Forward declarations ------------------------------------------------
+void idle_entry();      bool idle_event(uint8_t e);
+void receiving_update(); void receiving_entry(); bool receiving_event(uint8_t e);
+bool validating_event(uint8_t e);
+void complete_entry();
+
+// ---- State table ---------------------------------------------------------
+//                                           name          upd              entry          exit  ms  next  event             parent  initChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_IDLE]       = { PULSEHSM_NAME("IDLE"),       nullptr,          idle_entry,      nullptr, 0, -1, idle_event,       -1, -1 },
+    [ST_RECEIVING]  = { PULSEHSM_NAME("RECEIVING"),  receiving_update, receiving_entry, nullptr, 0, -1, receiving_event,  -1, -1 },
+    [ST_VALIDATING] = { PULSEHSM_NAME("VALIDATING"), nullptr,          nullptr,         nullptr, 0, -1, validating_event, -1, -1 },
+    [ST_COMPLETE]   = { PULSEHSM_NAME("COMPLETE"),   nullptr,          complete_entry,  nullptr, 0, -1, nullptr,          -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM parser(TABLE, ST_COUNT);
+
 // ---- setup / loop -------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
-  ST_IDLE       = parser.addState("IDLE",       nullptr,          idle_entry,      nullptr, 0,     -1, idle_event,       -1);
-  ST_RECEIVING  = parser.addState("RECEIVING",  receiving_update, receiving_entry, nullptr, 0,     -1, receiving_event,  -1);
-  ST_VALIDATING = parser.addState("VALIDATING", nullptr,          nullptr,         nullptr, 0,     -1, validating_event, -1);
-  ST_COMPLETE   = parser.addState("COMPLETE",   nullptr,          complete_entry,  nullptr, 0,     -1, nullptr,          -1);
-
   parser.begin(ST_IDLE);
 }
 
@@ -225,8 +234,8 @@ additional cross-core FIFO or mutex. PulseHSM's queue is only ISR-safe on a
 **Why `EVT_TIMEOUT` via `receiving_update()`?**  
 `receiving_update()` reads `getStateElapsed()` so the timeout starts fresh every
 time `RECEIVING` is (re)entered — even mid-stream if the length is invalid and
-we re-enter. A fixed `timeoutMs` in `addState()` would work equally well here;
-the `update()` approach is shown to demonstrate dynamic timeout logic.
+we re-enter. A fixed `timeoutMs` in the `StaticState` row would work equally well
+here; the `update()` approach is shown to demonstrate dynamic timeout logic.
 
 **Queuing `EVT_FRAME_OK` / `EVT_FRAME_BAD` inside an event handler**  
 `receiving_event` calls `sendEvent()` and then `transitionTo(ST_VALIDATING)`.

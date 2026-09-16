@@ -6,19 +6,17 @@
 
 Not yet out of the box — `PulseHSM.h` includes `<Arduino.h>` for `millis()`, `noInterrupts()`, and `interrupts()`. A bare-metal port would need those three symbols stubbed. A framework-agnostic build is on the roadmap; open an issue if you need it sooner.
 
-### Can I have more than 8 states?
+### How many states can I have?
 
-Yes. Override the default before including the header:
+As many as you want, up to 127. The state count is simply the number of
+elements in your `StaticState TABLE[N]` array — there is no `PULSEHSM_MAX_STATES`
+macro to set. State indices are stored as `int8_t`, so the hard limit is 127.
 
 ```cpp
-#define PULSEHSM_MAX_STATES 24   // must be ≤ 127
-#include "PulseHSM.h"
-```
-
-In PlatformIO add it to `build_flags`:
-
-```ini
-build_flags = -DPULSEHSM_MAX_STATES=24
+enum StateID : int8_t { ST_A, ST_B, ..., ST_COUNT };   // ST_COUNT is the limit
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = { ... };
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+PulseHSM fsm(TABLE, ST_COUNT);
 ```
 
 ### Can I run multiple HSMs simultaneously?
@@ -26,8 +24,8 @@ build_flags = -DPULSEHSM_MAX_STATES=24
 Yes — each `PulseHSM` instance is fully independent. Call `update()` for each one in `loop()`. There is no shared state between instances.
 
 ```cpp
-PulseHSM motorFsm;
-PulseHSM uiFsm;
+PulseHSM motorFsm(MOTOR_TABLE, MOTOR_COUNT);
+PulseHSM uiFsm(UI_TABLE, UI_COUNT);
 
 void loop() {
   motorFsm.update();
@@ -45,7 +43,7 @@ No. PulseHSM models a single active leaf at a time. For parallel regions, run tw
 
 ### What happens if the event queue fills up?
 
-`sendEvent()` returns `false` and the event is silently dropped. The queue is never overwritten. Raise `PULSEHSM_MAX_EVENTS` (must remain a power of two) if you need a larger buffer:
+`sendEvent()` returns `false` and the event is silently dropped. The queue is never overwritten. Call `getDroppedEvents()` at any time to see how many events have been dropped since `begin()`. Raise `PULSEHSM_MAX_EVENTS` (must remain a power of two) if you need a larger buffer:
 
 ```cpp
 #define PULSEHSM_MAX_EVENTS 32

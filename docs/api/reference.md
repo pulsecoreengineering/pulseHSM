@@ -13,60 +13,73 @@ pass it to the parent.
 
 ---
 
-## addState()
+## StaticState struct
 
 ```cpp
-int addState(const char* name,
-             Action        update,
-             Action        entry,
-             Action        exit,
-             unsigned long timeoutMs,
-             int           timeoutNext,
-             EventCb       onEvent,
-             int           parent = -1);
+struct StaticState {
+    const char*   name;          // human-readable label (or nullptr / PULSEHSM_NAME)
+    Action        update;        // called every tick; nullptr to opt out
+    Action        entry;         // called on entry; nullptr to opt out
+    Action        exit;          // called on exit; nullptr to opt out
+    unsigned long timeoutMs;     // 0 = no timeout
+    int8_t        timeoutNext;   // state index to go to on timeout; -1 = none
+    EventCb       onEvent;       // event handler; nullptr to opt out (event bubbles)
+    int8_t        parent;        // parent state index; -1 for a root state
+    int8_t        initialChild;  // default substate index; -1 for a leaf
+};
 ```
 
-Registers a new state. Returns the state's index (0, 1, 2, …) on success, or
-`-1` on failure.
+**Field order** mirrors the original `addState()` argument order, with `initialChild`
+appended as the ninth field.
 
-**Failures:**
-- The state table is full (`stateCount >= PULSEHSM_MAX_STATES`).
-- The depth of `parent`'s ancestry chain exceeds `PULSEHSM_MAX_DEPTH`.
+**Macro helpers:**
 
-**Rules:**
-- A parent must be added **before** its children — you pass the parent's index,
-  which only exists after `addState()` returns it.
-- Pass `parent = -1` for a root-level state.
-- Any parameter may be `nullptr` / `0` / `-1` to opt out of that feature.
-
-**Parameters:**
-
-| Parameter | Description |
+| Macro | Use |
 |---|---|
-| `name` | Human-readable label for debugging (stored as pointer, not copied) |
-| `update` | Called every `update()` tick while in this state or any descendant |
-| `entry` | Called once when entering this state |
-| `exit` | Called once when leaving this state |
-| `timeoutMs` | Milliseconds before an automatic transition; `0` = no timeout |
-| `timeoutNext` | State to transition to on timeout; `-1` = no timeout target |
-| `onEvent` | Event handler; return `true` to consume, `false` to bubble |
-| `parent` | Parent state index; `-1` for a root state |
+| `PULSEHSM_NAME("label")` | Expands to `"label"` normally; elided when `PULSEHSM_NAMES=0` |
+| `PULSEHSM_TABLE` | Placement attribute: `PROGMEM` on AVR, empty elsewhere — always apply this to your table declaration |
+
+**Typical table definition:**
+
+```cpp
+enum StateID : int8_t { ST_A = 0, ST_B, ST_COUNT };
+
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_A] = { PULSEHSM_NAME("A"), nullptr, entryA, nullptr, 0,    -1,   nullptr, -1, -1 },
+    [ST_B] = { PULSEHSM_NAME("B"), nullptr, entryB, nullptr, 500, ST_A,  nullptr, -1, -1 },
+};
+```
 
 ---
 
-## setInitial()
+## PULSEHSM_VALIDATE_TABLE()
 
 ```cpp
-bool setInitial(int parent, int child);
+PULSEHSM_VALIDATE_TABLE(table, count)
 ```
 
-Marks `child` as the default substate entered when `parent` is targeted.  
-`child` must be a **direct** child of `parent`.
+Compile-time macro that `static_assert`s the following on `table`:
 
-Returns `false` if either index is out of range, or if `child` is not a direct
-child of `parent`. Call after all relevant states have been added.
+- No state has an out-of-range `parent` or `timeoutNext`.
+- No parent/child relationship forms a cycle.
+- No state exceeds `PULSEHSM_MAX_DEPTH`.
+- Every composite (state with an `initialChild != -1`) has a valid direct child.
+- No half-wired timeouts (`timeoutMs > 0` with `timeoutNext == -1` is
+  intentionally allowed; only clearly invalid index values are caught).
 
-See [Initial Substates](../guide/initial-substates.md) for full details.
+Place it immediately after the table, before defining the `PulseHSM` instance.
+Nothing that used to be a runtime hang survives this check.
+
+---
+
+## PulseHSM constructor
+
+```cpp
+PulseHSM(const StaticState* stateTable, uint8_t count);
+```
+
+Constructs a state machine over the given table. `count` must equal the number of
+elements in `stateTable` (i.e., `ST_COUNT`).
 
 ---
 
@@ -77,15 +90,15 @@ bool begin(int startState);
 ```
 
 Starts the machine in `startState`. Calls the full entry chain from the root down
-to the resolved leaf. Resets the event queue.
+to the resolved leaf. Resets the event queue and the dropped-events counter.
 
 `startState` may be:
 - A **leaf** — entered directly.
-- A **composite with `setInitial` configured** — resolved recursively to the
+- A **composite with `initialChild` configured** — resolved recursively to the
   deepest initial leaf.
 
-Returns `false` if `startState` is out of range, or is a composite with no
-`setInitial` set (a programming error).
+Returns `false` if `startState` is out of range, or is a composite with
+`initialChild == -1` (a programming error caught by `PULSEHSM_VALIDATE_TABLE`).
 
 Must be called once before `update()`.
 
@@ -101,7 +114,7 @@ The main scheduler tick. Call once per `loop()`.
 
 Order of operations each tick:
 1. Drain the event queue — dispatch each queued event via `onEvent` bubbling.
-2. Check the current state's timeout — if elapsed, set the pending transition.
+2. Check the current state's timeout — if elapsed, apply the pending transition.
 3. Run `update()` callbacks from the root down to the current leaf.
 4. Apply any pending transition (from `transitionTo()`, a timeout, or an event
    handler that called `transitionTo()`).
@@ -115,13 +128,13 @@ void transitionTo(int newState);
 ```
 
 Requests a transition to `newState`. The transition is **deferred** — it is
-applied at the end of the current `update()` tick, after `_runUpdates()`.
+applied at the end of the current `update()` tick, after `update()` callbacks run.
 
 Safe to call from inside `entry()`, `exit()`, `update()`, or `onEvent()`. If
 called from inside `entry()` or `exit()` (i.e., while a transition is already
 executing), the request is recorded and applied on the **next** `update()`.
 
-`newState` may be a leaf or a composite with `setInitial` configured.
+`newState` may be a leaf or a composite with `initialChild` configured.
 
 ---
 
@@ -159,7 +172,7 @@ const char* getCurrentName() const;
 ```
 
 Returns the `name` string of the current leaf state. Never returns `nullptr`
-(returns `""` for an unnamed state).
+(returns `""` for an unnamed state or when `PULSEHSM_NAMES=0`).
 
 ---
 
@@ -170,7 +183,7 @@ const char* getStateName(int idx) const;
 ```
 
 Returns the `name` string of the state at index `idx`. Returns `""` for an
-out-of-range or unnamed state.
+out-of-range or unnamed state, or when `PULSEHSM_NAMES=0`.
 
 ---
 
@@ -181,8 +194,8 @@ unsigned long getStateElapsed() const;
 ```
 
 Returns the number of milliseconds since the machine last entered the current
-state (i.e., since `entryTime` was recorded). Useful in `update()` for
-time-based behaviour that needs finer control than `timeoutMs`.
+state. Useful in `update()` for time-based behaviour that needs finer control than
+`timeoutMs`.
 
 ---
 
@@ -204,7 +217,7 @@ const char* getPreviousName() const;
 ```
 
 Returns the `name` string of the previous state. Returns `""` before the first
-transition.
+transition, or when `PULSEHSM_NAMES=0`.
 
 ---
 
@@ -219,6 +232,25 @@ inside an `onEvent` callback (or any callback synchronously invoked from one).
 
 ---
 
+## getDroppedEvents()
+
+```cpp
+uint8_t getDroppedEvents() const;
+```
+
+Returns the number of `sendEvent()` calls that were rejected because the queue was
+full since the last `begin()`. Saturates at 255. Use this to detect queue
+overflows at runtime.
+
+```cpp
+if (fsm.getDroppedEvents() > 0) {
+    Serial.print("Events dropped: ");
+    Serial.println(fsm.getDroppedEvents());
+}
+```
+
+---
+
 ## isInHierarchy()
 
 ```cpp
@@ -229,9 +261,9 @@ Returns `true` if `state` is the current leaf **or** any active ancestor of it.
 
 ```cpp
 // While in state STARTING (child of RUNNING):
-fsm.isInHierarchy(STARTING) == true
-fsm.isInHierarchy(RUNNING)  == true   // active ancestor
-fsm.isInHierarchy(FAULT)    == false  // not in the active chain
+fsm.isInHierarchy(ST_STARTING) == true
+fsm.isInHierarchy(ST_RUNNING)  == true   // active ancestor
+fsm.isInHierarchy(ST_FAULT)    == false  // not in the active chain
 ```
 
 Useful for status displays and conditional logic outside the state machine.

@@ -1,7 +1,7 @@
 # Industrial Machine Controller
 
 **Demonstrates:** safety-critical E-stop via superstate event bubbling, deep
-hierarchy, `setInitial`, timed start-up sequence, `isInHierarchy()` for
+hierarchy, `initialChild`, timed start-up sequence, `isInHierarchy()` for
 real-time status output, `update()` for continuous monitoring.
 
 ## The problem
@@ -37,15 +37,15 @@ MACHINE  (root superstate — E-stop handler here)
 ## Full example
 
 ```cpp
-#define PULSEHSM_MAX_STATES 16
 #define PULSEHSM_MAX_EVENTS 16
 #include "PulseHSM.h"
 
-PulseHSM fsm;
-
 // ---- State indices -------------------------------------------------------
-int ST_MACHINE, ST_IDLE, ST_RUNNING, ST_STARTING;
-int ST_OPERATING, ST_NORMAL, ST_BOOSTING, ST_PAUSED, ST_FAULT;
+enum StateID : int8_t {
+    ST_MACHINE = 0, ST_IDLE, ST_FAULT, ST_RUNNING,
+    ST_STARTING, ST_PAUSED, ST_OPERATING, ST_NORMAL, ST_BOOSTING,
+    ST_COUNT
+};
 
 // ---- Events -------------------------------------------------------------
 enum Events : uint8_t {
@@ -183,27 +183,38 @@ void printStatus() {
   Serial.println("s");
 }
 
+// ---- Forward declarations ------------------------------------------------
+bool machineEvent(uint8_t e);
+void idleEntry();    bool idleEvent(uint8_t e);
+void fault_entry();  bool fault_event(uint8_t e);
+void running_entry(); void running_exit(); bool running_event(uint8_t e);
+void starting_entry(); bool starting_event(uint8_t e);
+void paused_entry();  bool paused_event(uint8_t e);
+void operating_entry(); bool operating_event(uint8_t e);
+void normal_entry();   bool normal_event(uint8_t e);
+void boosting_entry(); void boosting_exit();
+
+// ---- State table ---------------------------------------------------------
+//                                    name           upd   entry           exit           ms      next       event          parent        initChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_MACHINE]   = { PULSEHSM_NAME("MACHINE"),   nullptr, nullptr,        nullptr,       0,     -1,        machineEvent,  -1,          ST_IDLE     },
+    [ST_IDLE]      = { PULSEHSM_NAME("IDLE"),      nullptr, idleEntry,      nullptr,       0,     -1,        idleEvent,     ST_MACHINE,  -1          },
+    [ST_FAULT]     = { PULSEHSM_NAME("FAULT"),     nullptr, fault_entry,    nullptr,       0,     -1,        fault_event,   ST_MACHINE,  -1          },
+    [ST_RUNNING]   = { PULSEHSM_NAME("RUNNING"),   nullptr, running_entry,  running_exit,  0,     -1,        running_event, ST_MACHINE,  ST_STARTING },
+    [ST_STARTING]  = { PULSEHSM_NAME("STARTING"),  nullptr, starting_entry, nullptr,       5000,  -1,        starting_event,ST_RUNNING,  -1          },
+    [ST_PAUSED]    = { PULSEHSM_NAME("PAUSED"),    nullptr, paused_entry,   nullptr,       0,     -1,        paused_event,  ST_RUNNING,  -1          },
+    [ST_OPERATING] = { PULSEHSM_NAME("OPERATING"), nullptr, operating_entry,nullptr,       0,     -1,        operating_event,ST_RUNNING, ST_NORMAL   },
+    [ST_NORMAL]    = { PULSEHSM_NAME("NORMAL"),    nullptr, normal_entry,   nullptr,       0,     -1,        normal_event,  ST_OPERATING,-1          },
+    [ST_BOOSTING]  = { PULSEHSM_NAME("BOOSTING"),  nullptr, boosting_entry, boosting_exit, 10000, ST_NORMAL, nullptr,       ST_OPERATING,-1          },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
 // ---- setup / loop -------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
-  // Root superstate first, then children in depth-first order
-  ST_MACHINE   = fsm.addState("MACHINE",   nullptr, nullptr,        nullptr,       0,     -1, machineEvent,   -1);
-  ST_IDLE      = fsm.addState("IDLE",      nullptr, idleEntry,      nullptr,       0,     -1, idleEvent,      ST_MACHINE);
-  ST_FAULT     = fsm.addState("FAULT",     nullptr, fault_entry,    nullptr,       0,     -1, fault_event,    ST_MACHINE);
-  ST_RUNNING   = fsm.addState("RUNNING",   nullptr, running_entry,  running_exit,  0,     -1, running_event,  ST_MACHINE);
-  ST_STARTING  = fsm.addState("STARTING",  nullptr, starting_entry, nullptr,       5000,  -1, starting_event, ST_RUNNING);
-  ST_PAUSED    = fsm.addState("PAUSED",    nullptr, paused_entry,   nullptr,       0,     -1, paused_event,   ST_RUNNING);
-  ST_OPERATING = fsm.addState("OPERATING", nullptr, operating_entry,nullptr,       0,     -1, operating_event,ST_RUNNING);
-  ST_NORMAL    = fsm.addState("NORMAL",    nullptr, normal_entry,   nullptr,       0,     -1, normal_event,   ST_OPERATING);
-  ST_BOOSTING  = fsm.addState("BOOSTING",  nullptr, boosting_entry, boosting_exit, 10000, ST_NORMAL, nullptr, ST_OPERATING);
-
-  // Wire up initial substates
-  fsm.setInitial(ST_MACHINE,   ST_IDLE);
-  fsm.setInitial(ST_RUNNING,   ST_STARTING);
-  fsm.setInitial(ST_OPERATING, ST_NORMAL);
-
-  fsm.begin(ST_MACHINE);   // → IDLE
+  fsm.begin(ST_MACHINE);   // → IDLE (initialChild)
 }
 
 void loop() {
@@ -233,7 +244,7 @@ void loop() {
 descendant of `ST_MACHINE`, any unhandled `EVT_ESTOP` bubbles up to this handler.
 You add one state, one handler, and the safety behaviour covers the entire machine.
 
-**Nested initial substates**  
+**Nested `initialChild` fields**  
 `begin(ST_MACHINE)` resolves: `ST_MACHINE` → `ST_IDLE` (leaf).  
 `transitionTo(ST_RUNNING)` resolves: `ST_RUNNING` → `ST_STARTING` (leaf).  
 `transitionTo(ST_OPERATING)` resolves: `ST_OPERATING` → `ST_NORMAL` (leaf).

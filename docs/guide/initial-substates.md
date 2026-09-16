@@ -22,51 +22,57 @@ operational area" must say `transitionTo(ST_IDLE)`. That's fine for two states, 
 in a real machine `OPERATIONAL` might have a half-dozen leaves, and the "correct
 entry point" may depend on the subgraph, not the caller.
 
-## setInitial()
+## The `initialChild` field
+
+Every `StaticState` has an `initialChild` field — the ninth and last positional
+field in the struct. Set it to the index of a direct child to make that child the
+default entry point; leave it as `-1` for leaf states or composites with no
+designated initial child.
 
 ```cpp
-bool setInitial(int parent, int child);
-```
+enum StateID : int8_t {
+    ST_OPERATIONAL = 0, ST_IDLE, ST_PROCESSING, ST_FINISHING,
+    ST_FAULT, ST_COUNT
+};
 
-Marks `child` as the default substate of `parent`. `child` must be a **direct**
-child of `parent`. Returns `false` on bad indices or if `child` is not a direct
-child.
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    //                          name           upd   entry  exit  ms  next  event  parent  initialChild
+    [ST_OPERATIONAL] = { PULSEHSM_NAME("OPERATIONAL"), nullptr, nullptr, nullptr, 0, -1, nullptr, -1, ST_IDLE },
+    [ST_IDLE]        = { PULSEHSM_NAME("IDLE"),        nullptr, idleEntry, nullptr, 0, -1, idleEvent, ST_OPERATIONAL, -1 },
+    // ... other children
+    [ST_FAULT]       = { PULSEHSM_NAME("FAULT"),       nullptr, faultEntry, nullptr, 0, -1, nullptr, -1, -1 },
+};
 
-```cpp
-int ST_OP   = fsm.addState("OPERATIONAL", ...parent = -1...);
-int ST_IDLE = fsm.addState("IDLE",        ...parent = ST_OP...);
-// ...
-fsm.setInitial(ST_OP, ST_IDLE);
-
-fsm.begin(ST_OP);               // resolves to ST_IDLE
-fsm.transitionTo(ST_OP);        // resolves to ST_IDLE
+fsm.begin(ST_OPERATIONAL);       // resolves to ST_IDLE
+fsm.transitionTo(ST_OPERATIONAL); // resolves to ST_IDLE
 ```
 
 ## Recursive resolution
 
 Resolution is recursive. If the initial child is itself a composite with its own
-initial child, PulseHSM walks down until it reaches a leaf.
+`initialChild`, PulseHSM walks down until it reaches a leaf.
 
 ```
-ROOT  (initialChild = MID)
-└── MID  (initialChild = LEAF)
+ROOT  (initialChild = ST_MID)
+└── MID  (initialChild = ST_LEAF)
     └── LEAF
 ```
 
 ```cpp
-int ROOT = fsm.addState("ROOT", ...);
-int MID  = fsm.addState("MID",  ..., ROOT);
-int LEAF = fsm.addState("LEAF", ..., MID);
-int OTHER = fsm.addState("OTHER", ...);   // sibling for navigation
+enum StateID : int8_t { ST_ROOT = 0, ST_MID, ST_LEAF, ST_OTHER, ST_COUNT };
 
-fsm.setInitial(ROOT, MID);
-fsm.setInitial(MID,  LEAF);
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_ROOT]  = { PULSEHSM_NAME("ROOT"),  nullptr, nullptr,     nullptr, 0, -1, nullptr, -1,       ST_MID  },
+    [ST_MID]   = { PULSEHSM_NAME("MID"),   nullptr, nullptr,     nullptr, 0, -1, nullptr, ST_ROOT,  ST_LEAF },
+    [ST_LEAF]  = { PULSEHSM_NAME("LEAF"),  nullptr, leafEntry,   nullptr, 0, -1, nullptr, ST_MID,   -1      },
+    [ST_OTHER] = { PULSEHSM_NAME("OTHER"), nullptr, otherEntry,  nullptr, 0, -1, nullptr, -1,       -1      },
+};
 
-fsm.begin(OTHER);
+fsm.begin(ST_OTHER);
 fsm.update();
-fsm.transitionTo(ROOT);   // resolves all the way down to LEAF
+fsm.transitionTo(ST_ROOT);   // resolves all the way down to LEAF
 fsm.update();
-// getCurrentState() == LEAF
+// getCurrentState() == ST_LEAF
 // entry order: ROOT entry(), MID entry(), LEAF entry()
 ```
 
@@ -77,47 +83,40 @@ then the initial child's, all the way to the resolved leaf. Exit callbacks fire
 **inner-to-outer**.
 
 ```
-transitionTo(ST_OP) while in ST_FAULT:
+transitionTo(ST_OPERATIONAL) while in ST_FAULT:
   1. FAULT exit()
-  2. ST_OP entry()
-  3. ST_IDLE entry()      ← resolved initial substate
+  2. OPERATIONAL entry()
+  3. IDLE entry()      ← resolved initial substate
 ```
 
 ## begin() with a composite
 
-`begin()` accepts a composite state as long as it has an initial substate
-configured (recursively). A composite with **no** `setInitial` is rejected (returns
-`false`) — this is a programming error, not a runtime condition.
+`begin()` accepts a composite state as long as it has an `initialChild` configured
+(recursively). A composite with `initialChild = -1` is rejected (returns `false`) —
+this is a programming error caught at compile time by `PULSEHSM_VALIDATE_TABLE`.
 
 ```cpp
-fsm.begin(ST_OP);   // ✓ ST_OP.initialChild = ST_IDLE (a leaf)
-fsm.begin(ST_ROOT); // ✓ ST_ROOT → ST_MID → ST_LEAF (recursive)
-fsm.begin(ST_OP);   // ✗ if setInitial was never called on ST_OP → returns false
+fsm.begin(ST_OPERATIONAL); // ✓  initialChild = ST_IDLE (a leaf)
+fsm.begin(ST_ROOT);        // ✓  ST_ROOT → ST_MID → ST_LEAF (recursive)
 ```
 
-## Backward compatibility
+## Compile-time validation
 
-Code that never calls `setInitial()` is unaffected. `initialChild` defaults to
-`-1`, so `_resolveEntry()` returns its input unchanged — every existing transition
-and `begin()` call behaves identically.
+`PULSEHSM_VALIDATE_TABLE` raises a compiler error if a composite state's
+`initialChild` does not point to a direct child, catching wiring mistakes before
+any code runs on the MCU.
 
 ## Common mistakes
 
-**Wrong: child is not a direct child**
+**Wrong: `initialChild` is not a direct child**
 
-```cpp
-// ROOT → MID → LEAF
-fsm.setInitial(ROOT, LEAF);   // ✗ returns false — LEAF is a grandchild
-fsm.setInitial(ROOT, MID);    // ✓
-```
+If `ROOT → MID → LEAF`, you cannot set `ROOT.initialChild = ST_LEAF` — LEAF is a
+grandchild of ROOT. Set `ROOT.initialChild = ST_MID` and `MID.initialChild = ST_LEAF`.
+`PULSEHSM_VALIDATE_TABLE` catches this at compile time.
 
-**Wrong: forgetting to add parent before child**
+**Wrong: composite with no `initialChild`**
 
-`addState()` requires the parent to be added first (its index is what you pass as
-`parent`). If you add a child before its parent, the parent index is unknown.
-
-```cpp
-// Correct order:
-int PARENT = fsm.addState("PARENT", ..., -1);
-int CHILD  = fsm.addState("CHILD",  ..., PARENT);  // PARENT already has an index
-```
+If you call `fsm.begin(ST_COMPOSITE)` or `fsm.transitionTo(ST_COMPOSITE)` where
+`ST_COMPOSITE.initialChild == -1`, `begin()` returns `false` and the transition is
+ignored. `PULSEHSM_VALIDATE_TABLE` flags this at compile time so it never reaches
+the MCU.

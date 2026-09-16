@@ -1,6 +1,6 @@
 # Device Connection Manager
 
-**Demonstrates:** multi-level hierarchy, `setInitial`, timed retry with
+**Demonstrates:** multi-level hierarchy, `initialChild`, timed retry with
 exponential backoff, event payloads (error code), `getPreviousState()` for
 logging, `isInHierarchy()` for status display.
 
@@ -28,16 +28,16 @@ FAULT          (unrecoverable error; requires user intervention)
 ## Full example
 
 ```cpp
-#define PULSEHSM_MAX_STATES 16
 #define PULSEHSM_MAX_EVENTS 16
 #include "PulseHSM.h"
 
-PulseHSM fsm;
-
 // ---- State indices -------------------------------------------------------
-int ST_DISCONNECTED, ST_CONNECTING, ST_BACKING_OFF;
-int ST_CONNECTED, ST_AUTHENTICATING, ST_ONLINE;
-int ST_FAULT;
+enum StateID : int8_t {
+    ST_DISCONNECTED = 0, ST_CONNECTED, ST_FAULT,
+    ST_CONNECTING, ST_BACKING_OFF,
+    ST_AUTHENTICATING, ST_ONLINE,
+    ST_COUNT
+};
 
 // ---- Events -------------------------------------------------------------
 enum Events : uint8_t {
@@ -178,25 +178,34 @@ bool fault_event(uint8_t e) {
   return false;
 }
 
+// ---- Forward declarations (callbacks reference fsm, defined after the table)
+void disconnected_entry(); void disconnected_exit();
+void connecting_entry();   bool connecting_event(uint8_t e);
+void backingOff_update();  void backingOff_entry();
+void connected_entry();    void connected_exit();    bool connected_event(uint8_t e);
+void authenticating_entry(); bool authenticating_event(uint8_t e);
+bool online_event(uint8_t e);
+void fault_entry();        bool fault_event(uint8_t e);
+
+// ---- State table ---------------------------------------------------------
+//                                         name           upd              entry               exit                ms  next  event              parent           initChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_DISCONNECTED]   = { PULSEHSM_NAME("DISCONNECTED"),   nullptr,         disconnected_entry,  disconnected_exit,  0,  -1, fault_event,         -1,              ST_CONNECTING    },
+    [ST_CONNECTED]      = { PULSEHSM_NAME("CONNECTED"),      nullptr,         connected_entry,     connected_exit,     0,  -1, connected_event,     -1,              ST_AUTHENTICATING},
+    [ST_FAULT]          = { PULSEHSM_NAME("FAULT"),          nullptr,         fault_entry,         nullptr,            0,  -1, nullptr,             -1,              -1               },
+    [ST_CONNECTING]     = { PULSEHSM_NAME("CONNECTING"),     nullptr,         connecting_entry,    nullptr,            0,  -1, connecting_event,    ST_DISCONNECTED, -1               },
+    [ST_BACKING_OFF]    = { PULSEHSM_NAME("BACKING_OFF"),    backingOff_update,backingOff_entry,   nullptr,            0,  -1, nullptr,             ST_DISCONNECTED, -1               },
+    [ST_AUTHENTICATING] = { PULSEHSM_NAME("AUTHENTICATING"), nullptr,         authenticating_entry,nullptr,            0,  -1, authenticating_event,ST_CONNECTED,    -1               },
+    [ST_ONLINE]         = { PULSEHSM_NAME("ONLINE"),         nullptr,         nullptr,             nullptr,            0,  -1, online_event,        ST_CONNECTED,    -1               },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
 // ---- setup / loop -------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
-  // Superstates first
-  ST_DISCONNECTED  = fsm.addState("DISCONNECTED",  nullptr, disconnected_entry, disconnected_exit, 0, -1, fault_event,   -1);
-  ST_CONNECTED     = fsm.addState("CONNECTED",     nullptr, connected_entry,    connected_exit,    0, -1, connected_event,-1);
-  ST_FAULT         = fsm.addState("FAULT",         nullptr, fault_entry,        nullptr,           0, -1, nullptr,        -1);
-
-  // Children
-  ST_CONNECTING    = fsm.addState("CONNECTING",    nullptr,         connecting_entry,     nullptr, 0, -1, connecting_event,    ST_DISCONNECTED);
-  ST_BACKING_OFF   = fsm.addState("BACKING_OFF",   backingOff_update, backingOff_entry,   nullptr, 0, -1, nullptr,             ST_DISCONNECTED);
-  ST_AUTHENTICATING= fsm.addState("AUTHENTICATING",nullptr,         authenticating_entry, nullptr, 0, -1, authenticating_event,ST_CONNECTED);
-  ST_ONLINE        = fsm.addState("ONLINE",        nullptr,         nullptr,              nullptr, 0, -1, online_event,        ST_CONNECTED);
-
-  fsm.setInitial(ST_DISCONNECTED, ST_CONNECTING);
-  fsm.setInitial(ST_CONNECTED,    ST_AUTHENTICATING);
-
-  fsm.begin(ST_DISCONNECTED);   // → CONNECTING
+  fsm.begin(ST_DISCONNECTED);   // → CONNECTING (initialChild)
 }
 
 void loop() {

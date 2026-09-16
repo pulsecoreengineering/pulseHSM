@@ -1,6 +1,6 @@
 # Vending Machine
 
-**Demonstrates:** hierarchy, `setInitial`, event payloads, shared fault handling
+**Demonstrates:** hierarchy, `initialChild`, event payloads, shared fault handling
 via event bubbling, `isInHierarchy()` for display logic.
 
 ## State diagram
@@ -29,15 +29,16 @@ OUT_OF_SERVICE  ← EVT_SERVICED → OPERATIONAL
 ## Full example
 
 ```cpp
-#define PULSEHSM_MAX_STATES 16
 #define PULSEHSM_MAX_EVENTS 16
 #include "PulseHSM.h"
 
-PulseHSM fsm;
-
 // ---- State indices -------------------------------------------------------
-int ST_OPERATIONAL, ST_IDLE, ST_HAS_MONEY, ST_SELECTING, ST_CONFIRMED;
-int ST_DISPENSING, ST_OUT_OF_SERVICE;
+enum StateID : int8_t {
+    ST_OPERATIONAL = 0, ST_OUT_OF_SERVICE,
+    ST_IDLE, ST_HAS_MONEY, ST_DISPENSING,
+    ST_SELECTING, ST_CONFIRMED,
+    ST_COUNT
+};
 
 // ---- Events -------------------------------------------------------------
 enum Events : uint8_t {
@@ -151,24 +152,34 @@ bool oosEvent(uint8_t e) {
   return false;
 }
 
+// ---- Forward declarations ------------------------------------------------
+bool operationalEvent(uint8_t e);
+void oosEntry();      bool oosEvent(uint8_t e);
+void idleEntry();     bool idleEvent(uint8_t e);
+void hasMoney_entry(); bool hasMoney_event(uint8_t e);
+void dispensingEntry(); void dispensingExit(); bool dispensingEvent(uint8_t e);
+bool selectingEvent(uint8_t e);
+void confirmedEntry();
+
+// ---- State table ---------------------------------------------------------
+//                                         name            upd   entry          exit           ms  next  event              parent          initChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_OPERATIONAL]   = { PULSEHSM_NAME("OPERATIONAL"), nullptr, nullptr,        nullptr,       0,  -1, operationalEvent, -1,              ST_IDLE      },
+    [ST_OUT_OF_SERVICE]= { PULSEHSM_NAME("OOS"),         nullptr, oosEntry,       nullptr,       0,  -1, oosEvent,         -1,              -1           },
+    [ST_IDLE]          = { PULSEHSM_NAME("IDLE"),         nullptr, idleEntry,      nullptr,       0,  -1, idleEvent,        ST_OPERATIONAL,  -1           },
+    [ST_HAS_MONEY]     = { PULSEHSM_NAME("HAS_MONEY"),    nullptr, hasMoney_entry, nullptr,       0,  -1, hasMoney_event,   ST_OPERATIONAL,  ST_SELECTING },
+    [ST_DISPENSING]    = { PULSEHSM_NAME("DISPENSING"),   nullptr, dispensingEntry,dispensingExit,0,  -1, dispensingEvent,  ST_OPERATIONAL,  -1           },
+    [ST_SELECTING]     = { PULSEHSM_NAME("SELECTING"),    nullptr, nullptr,        nullptr,       0,  -1, selectingEvent,   ST_HAS_MONEY,    -1           },
+    [ST_CONFIRMED]     = { PULSEHSM_NAME("CONFIRMED"),    nullptr, confirmedEntry, nullptr,       0,  -1, nullptr,          ST_HAS_MONEY,    -1           },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
 // ---- setup / loop -------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
-  // Parents first
-  ST_OPERATIONAL   = fsm.addState("OPERATIONAL", nullptr, nullptr,        nullptr,       0, -1, operationalEvent, -1);
-  ST_OUT_OF_SERVICE= fsm.addState("OOS",         nullptr, oosEntry,       nullptr,       0, -1, oosEvent,         -1);
-  ST_IDLE          = fsm.addState("IDLE",         nullptr, idleEntry,      nullptr,       0, -1, idleEvent,        ST_OPERATIONAL);
-  ST_HAS_MONEY     = fsm.addState("HAS_MONEY",    nullptr, hasMoney_entry, nullptr,       0, -1, hasMoney_event,   ST_OPERATIONAL);
-  ST_DISPENSING    = fsm.addState("DISPENSING",   nullptr, dispensingEntry,dispensingExit,0, -1, dispensingEvent,  ST_OPERATIONAL);
-  ST_SELECTING     = fsm.addState("SELECTING",    nullptr, nullptr,        nullptr,       0, -1, selectingEvent,   ST_HAS_MONEY);
-  ST_CONFIRMED     = fsm.addState("CONFIRMED",    nullptr, confirmedEntry, nullptr,       0, -1, nullptr,          ST_HAS_MONEY);
-
-  // Initial substates
-  fsm.setInitial(ST_OPERATIONAL, ST_IDLE);
-  fsm.setInitial(ST_HAS_MONEY,   ST_SELECTING);
-
-  fsm.begin(ST_OPERATIONAL);   // → IDLE
+  fsm.begin(ST_OPERATIONAL);   // → IDLE (initialChild)
 }
 
 void loop() {
