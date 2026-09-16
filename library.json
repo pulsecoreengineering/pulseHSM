@@ -1,7 +1,7 @@
 {
   "name": "PulseHSM",
-  "version": "1.2.1",
-  "description": "Tiny hierarchical state machine for embedded C++ — nested states, event bubbling, and timed transitions in a single header.",
+  "version": "2.0.0",
+  "description": "Tiny hierarchical state machine for embedded C++ — compile-time flash-resident state tables, nested states, event bubbling, and timed transitions.",
   "keywords": ["hsm", "state-machine", "embedded", "finite-state-machine", "arduino", "avr", "esp32", "rp2040", "stm32", "samd"],
   "authors": [
     {

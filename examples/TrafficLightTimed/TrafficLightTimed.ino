@@ -1,5 +1,5 @@
 /*
- * 03_TrafficLight — chained timed transitions
+ * 03_TrafficLightTimed — chained timed transitions
  *
  * Classic traffic light: RED → GREEN → YELLOW → RED, driven entirely
  * by per-state timeouts. No events, no update callbacks — just timers.
@@ -23,47 +23,40 @@
 #define PIN_YELLOW 5
 #define PIN_GREEN  6
 
-PulseHSM fsm;
+enum StateID : int8_t { ST_RED = 0, ST_GREEN, ST_YELLOW, ST_COUNT };
+
+void onRed();
+void onGreen();
+void onYellow();
+
+//                                name             update  entry    exit     ms    next      event   parent  initialChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_RED]    = { PULSEHSM_NAME("RED"),    nullptr, onRed,    nullptr, 5000, ST_GREEN,  nullptr, -1, -1 },
+    [ST_GREEN]  = { PULSEHSM_NAME("GREEN"),  nullptr, onGreen,  nullptr, 4000, ST_YELLOW, nullptr, -1, -1 },
+    [ST_YELLOW] = { PULSEHSM_NAME("YELLOW"), nullptr, onYellow, nullptr, 1500, ST_RED,    nullptr, -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
 
 void allOff() {
-  digitalWrite(PIN_RED,    LOW);
-  digitalWrite(PIN_YELLOW, LOW);
-  digitalWrite(PIN_GREEN,  LOW);
+    digitalWrite(PIN_RED,    LOW);
+    digitalWrite(PIN_YELLOW, LOW);
+    digitalWrite(PIN_GREEN,  LOW);
 }
 
-void onRed() {
-  allOff();
-  digitalWrite(PIN_RED, HIGH);
-  Serial.println("RED    — stop");
-}
-
-void onGreen() {
-  allOff();
-  digitalWrite(PIN_GREEN, HIGH);
-  Serial.println("GREEN  — go");
-}
-
-void onYellow() {
-  allOff();
-  digitalWrite(PIN_YELLOW, HIGH);
-  Serial.println("YELLOW — caution");
-}
+void onRed()    { allOff(); digitalWrite(PIN_RED,    HIGH); Serial.println("RED    — stop");    }
+void onGreen()  { allOff(); digitalWrite(PIN_GREEN,  HIGH); Serial.println("GREEN  — go");      }
+void onYellow() { allOff(); digitalWrite(PIN_YELLOW, HIGH); Serial.println("YELLOW — caution"); }
 
 void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_RED,    OUTPUT);
-  pinMode(PIN_YELLOW, OUTPUT);
-  pinMode(PIN_GREEN,  OUTPUT);
-
-  // Indices: RED=0, GREEN=1, YELLOW=2
-  //                   name       update  entry     exit     ms    next  event
-  fsm.addState("RED",    nullptr, onRed,    nullptr, 5000,  1, nullptr); // 5 s red
-  fsm.addState("GREEN",  nullptr, onGreen,  nullptr, 4000,  2, nullptr); // 4 s green
-  fsm.addState("YELLOW", nullptr, onYellow, nullptr, 1500,  0, nullptr); // 1.5 s yellow
-
-  fsm.begin(0); // start RED
+    Serial.begin(115200);
+    pinMode(PIN_RED,    OUTPUT);
+    pinMode(PIN_YELLOW, OUTPUT);
+    pinMode(PIN_GREEN,  OUTPUT);
+    fsm.begin(ST_RED);
 }
 
 void loop() {
-  fsm.update();
+    fsm.update();
 }

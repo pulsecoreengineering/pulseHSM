@@ -12,7 +12,6 @@
  *   - sendEvent() with an int32_t payload
  *   - getEventData() : reading the payload inside onEvent
  *   - Multiple events dispatched to the same handler
- *   - State-local variables via statics in callbacks
  *
  * Compatible: AVR, ESP32, RP2040, STM32, SAMD.
  */
@@ -22,97 +21,95 @@
 #define COIN_VALUE   25   // cents per coin
 #define ITEM_PRICE   75   // cents
 
-PulseHSM fsm;
+enum StateID : int8_t { ST_IDLE = 0, ST_COLLECTING, ST_DISPENSING, ST_COUNT };
+enum Evt     : uint8_t { EVT_COIN = 1, EVT_SELECT, EVT_CANCEL };
 
-enum Evt : uint8_t { EVT_COIN = 1, EVT_SELECT, EVT_CANCEL };
+static int balance = 0;
 
-int ST_IDLE, ST_COLLECTING, ST_DISPENSING;
+// Forward declarations
+void onEntry_Idle();
+bool onEvent_Idle(uint8_t evt);
+void onEntry_Collecting();
+bool onEvent_Collecting(uint8_t evt);
+void onEntry_Dispensing();
 
-static int balance = 0;   // cents inserted so far
+//                                name              update  entry               exit     ms    next     event              parent  initialChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_IDLE]       = { PULSEHSM_NAME("IDLE"),       nullptr, onEntry_Idle,       nullptr, 0,    -1,      onEvent_Idle,      -1, -1 },
+    [ST_COLLECTING] = { PULSEHSM_NAME("COLLECTING"), nullptr, onEntry_Collecting, nullptr, 0,    -1,      onEvent_Collecting,-1, -1 },
+    [ST_DISPENSING] = { PULSEHSM_NAME("DISPENSING"), nullptr, onEntry_Dispensing, nullptr, 2000, ST_IDLE, nullptr,           -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
 
 // ── IDLE ─────────────────────────────────────────────────
 
 void onEntry_Idle() {
-  balance = 0;
-  Serial.println("\n[IDLE] Insert coins (c) to start.");
+    balance = 0;
+    Serial.println("\n[IDLE] Insert coins (c) to start.");
 }
 
 bool onEvent_Idle(uint8_t evt) {
-  if (evt == EVT_COIN) {
-    balance += fsm.getEventData();
-    fsm.transitionTo(ST_COLLECTING);
-    return true;
-  }
-  return false;
+    if (evt == EVT_COIN) {
+        balance += fsm.getEventData();
+        fsm.transitionTo(ST_COLLECTING);
+        return true;
+    }
+    return false;
 }
 
 // ── COLLECTING ────────────────────────────────────────────
 
 void onEntry_Collecting() {
-  Serial.print("[COLLECTING] Balance: ");
-  Serial.print(balance);
-  Serial.println(" ¢  — insert more (c), select (s), or cancel (r).");
+    Serial.print("[COLLECTING] Balance: ");
+    Serial.print(balance);
+    Serial.println(" ¢  — insert more (c), select (s), or cancel (r).");
 }
 
 bool onEvent_Collecting(uint8_t evt) {
-  if (evt == EVT_COIN) {
-    balance += fsm.getEventData();
-    Serial.print("  + coin  →  ");
-    Serial.print(balance);
-    Serial.println(" ¢");
-    if (balance >= ITEM_PRICE) {
-      Serial.println("  Enough credit! Press (s) to dispense.");
+    if (evt == EVT_COIN) {
+        balance += fsm.getEventData();
+        Serial.print("  + coin  →  "); Serial.print(balance); Serial.println(" ¢");
+        if (balance >= ITEM_PRICE) Serial.println("  Enough credit! Press (s) to dispense.");
+        return true;
     }
-    return true;
-  }
-  if (evt == EVT_SELECT) {
-    if (balance >= ITEM_PRICE) {
-      fsm.transitionTo(ST_DISPENSING);
-    } else {
-      Serial.print("  Need ");
-      Serial.print(ITEM_PRICE - balance);
-      Serial.println(" ¢ more.");
+    if (evt == EVT_SELECT) {
+        if (balance >= ITEM_PRICE) { fsm.transitionTo(ST_DISPENSING); }
+        else { Serial.print("  Need "); Serial.print(ITEM_PRICE - balance); Serial.println(" ¢ more."); }
+        return true;
     }
-    return true;
-  }
-  if (evt == EVT_CANCEL) {
-    Serial.print("  Refunding ");
-    Serial.print(balance);
-    Serial.println(" ¢.");
-    fsm.transitionTo(ST_IDLE);
-    return true;
-  }
-  return false;
+    if (evt == EVT_CANCEL) {
+        Serial.print("  Refunding "); Serial.print(balance); Serial.println(" ¢.");
+        fsm.transitionTo(ST_IDLE);
+        return true;
+    }
+    return false;
 }
 
 // ── DISPENSING ────────────────────────────────────────────
 
 void onEntry_Dispensing() {
-  int change = balance - ITEM_PRICE;
-  Serial.print("[DISPENSING] Vending item");
-  if (change > 0) { Serial.print(" + "); Serial.print(change); Serial.print(" ¢ change"); }
-  Serial.println("... (returns to IDLE in 2 s)");
+    int change = balance - ITEM_PRICE;
+    Serial.print("[DISPENSING] Vending item");
+    if (change > 0) { Serial.print(" + "); Serial.print(change); Serial.print(" ¢ change"); }
+    Serial.println("... (returns to IDLE in 2 s)");
 }
 
 // ── Setup & loop ──────────────────────────────────────────
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial) {}   // wait for USB Serial on boards that need it
-
-  ST_IDLE       = fsm.addState("IDLE",       nullptr, onEntry_Idle,       nullptr, 0,    -1, onEvent_Idle);
-  ST_COLLECTING = fsm.addState("COLLECTING", nullptr, onEntry_Collecting, nullptr, 0,    -1, onEvent_Collecting);
-  ST_DISPENSING = fsm.addState("DISPENSING", nullptr, onEntry_Dispensing, nullptr, 2000, ST_IDLE, nullptr);
-
-  fsm.begin(ST_IDLE);
+    Serial.begin(115200);
+    while (!Serial) {}
+    fsm.begin(ST_IDLE);
 }
 
 void loop() {
-  if (Serial.available()) {
-    char ch = Serial.read();
-    if (ch == 'c') fsm.sendEvent(EVT_COIN,   COIN_VALUE);
-    if (ch == 's') fsm.sendEvent(EVT_SELECT,  0);
-    if (ch == 'r') fsm.sendEvent(EVT_CANCEL,  0);
-  }
-  fsm.update();
+    if (Serial.available()) {
+        char ch = Serial.read();
+        if (ch == 'c') fsm.sendEvent(EVT_COIN,   COIN_VALUE);
+        if (ch == 's') fsm.sendEvent(EVT_SELECT,  0);
+        if (ch == 'r') fsm.sendEvent(EVT_CANCEL,  0);
+    }
+    fsm.update();
 }

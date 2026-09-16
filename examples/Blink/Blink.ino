@@ -1,43 +1,36 @@
 /*
- * 01_Blink — PulseHSM getting started
+ * 01_Blink — minimal timed state machine
  *
- * The simplest possible HSM: two states that blink the built-in LED.
- * Each state has a 500 ms timeout that transitions to the other state.
+ * LED_ON and LED_OFF alternate every 500 ms purely through per-state timeouts.
+ * No events, no update callbacks — the classic blink loop as an FSM.
  *
- * Concepts shown:
- *   - addState()  : registering states with timeouts
- *   - timeoutMs   : how long to stay in this state
- *   - timeoutNext : which state to go to when the timer fires
- *   - begin()     : starting the machine
- *   - update()    : the main tick — call once per loop()
+ * The table is stored in flash on AVR (PULSEHSM_TABLE = PROGMEM) and in
+ * .rodata on everything else — zero RAM cost for the state descriptor.
  *
- * Compatible: AVR, ESP32, RP2040, STM32, SAMD, and any Arduino board.
+ * Compatible: AVR, ESP32, RP2040, STM32, SAMD.
  */
 
 #include "PulseHSM.h"
 
-// ESP32 Arduino core 3.x does not define LED_BUILTIN on all boards.
-// Change this to the correct GPIO number for your board.
-#ifndef LED_BUILTIN
-  #define LED_BUILTIN 2
-#endif
-
-PulseHSM fsm;
+enum StateID : int8_t { ST_LED_ON = 0, ST_LED_OFF, ST_COUNT };
 
 void ledOn()  { digitalWrite(LED_BUILTIN, HIGH); }
 void ledOff() { digitalWrite(LED_BUILTIN, LOW);  }
 
+//                         name                  update  entry    exit     ms   next         event   parent  initialChild
+constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
+    [ST_LED_ON]  = { PULSEHSM_NAME("LED_ON"),  nullptr, ledOn,  nullptr, 500, ST_LED_OFF, nullptr, -1, -1 },
+    [ST_LED_OFF] = { PULSEHSM_NAME("LED_OFF"), nullptr, ledOff, nullptr, 500, ST_LED_ON,  nullptr, -1, -1 },
+};
+PULSEHSM_VALIDATE_TABLE(TABLE, ST_COUNT);
+
+PulseHSM fsm(TABLE, ST_COUNT);
+
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  // States are indexed in the order they are added: 0, 1, 2 ...
-  // addState(name, update, entry, exit, timeoutMs, timeoutNext, onEvent, parent)
-  fsm.addState("LED_ON",  nullptr, ledOn,  nullptr, 500, 1, nullptr); // index 0 → times out to 1
-  fsm.addState("LED_OFF", nullptr, ledOff, nullptr, 500, 0, nullptr); // index 1 → times out to 0
-
-  fsm.begin(0); // start in LED_ON
+    pinMode(LED_BUILTIN, OUTPUT);
+    fsm.begin(ST_LED_ON);
 }
 
 void loop() {
-  fsm.update();
+    fsm.update();
 }
