@@ -19,7 +19,7 @@ an integer overflow in the state table, or a race condition in the ISR path),
 please report it **privately** before disclosing it publicly:
 
 1. Open a [GitHub Security Advisory](../../security/advisories/new) on this
-   repository (preferred — keeps the report private until a fix is released).
+   repository (preferred keeps the report private until a fix is released).
 2. Alternatively, e-mail the maintainers directly. Their address can be found
    in the commit history.
 
