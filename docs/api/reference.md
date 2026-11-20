@@ -1,4 +1,4 @@
-# API Reference
+# API reference
 
 ## Callback types
 
@@ -7,9 +7,7 @@ using Action  = void (*)();
 using EventCb = bool (*)(uint8_t event);
 ```
 
-`Action` is used for `entry`, `exit`, and `update` callbacks.  
-`EventCb` returns `true` if the event was consumed (stops bubbling), `false` to
-pass it to the parent.
+`Action` is the type for `entry`, `exit` and `update` callbacks. An `EventCb` returns `true` when it consumed the event, which stops it bubbling. It returns `false` to pass the event to the parent.
 
 ---
 
@@ -29,17 +27,16 @@ struct StaticState {
 };
 ```
 
-**Field order** mirrors the original `addState()` argument order, with `initialChild`
-appended as the ninth field.
+The fields follow the argument order of the original `addState()`, with `initialChild` added as the ninth.
 
-**Macro helpers:**
+Two macros help with tables:
 
 | Macro | Use |
 |---|---|
-| `PULSEHSM_NAME("label")` | Expands to `"label"` normally; elided when `PULSEHSM_NAMES=0` |
-| `PULSEHSM_TABLE` | Placement attribute: `PROGMEM` on AVR, empty elsewhere — always apply this to your table declaration |
+| `PULSEHSM_NAME("label")` | Expands to `"label"`. Removed when `PULSEHSM_NAMES=0` |
+| `PULSEHSM_TABLE` | Placement attribute: `PROGMEM` on AVR, empty elsewhere. Put it on every table declaration |
 
-**Typical table definition:**
+A typical table:
 
 ```cpp
 enum StateID : int8_t { ST_A = 0, ST_B, ST_COUNT };
@@ -58,17 +55,16 @@ constexpr PulseHSM::StaticState TABLE[ST_COUNT] PULSEHSM_TABLE = {
 PULSEHSM_VALIDATE_TABLE(table, count)
 ```
 
-Compile-time macro that `static_assert`s the following on `table`:
+This macro runs `static_assert` checks on `table` at compile time. It fails the build if:
 
-- No state has an out-of-range `parent` or `timeoutNext`.
-- No parent/child relationship forms a cycle.
-- No state exceeds `PULSEHSM_MAX_DEPTH`.
-- Every composite (state with an `initialChild != -1`) has a valid direct child.
-- No half-wired timeouts (`timeoutMs > 0` with `timeoutNext == -1` is
-  intentionally allowed; only clearly invalid index values are caught).
+- a state has an out-of-range `parent` or `timeoutNext`
+- the parent/child links form a cycle
+- a state is deeper than `PULSEHSM_MAX_DEPTH`
+- a composite state (one with `initialChild != -1`) has no valid direct child
 
-Place it immediately after the table, before defining the `PulseHSM` instance.
-Nothing that used to be a runtime hang survives this check.
+A timeout with `timeoutMs > 0` and `timeoutNext == -1` is allowed on purpose. Only clearly invalid index values are caught.
+
+Put it right after the table and before the `PulseHSM` instance. Anything that used to hang at runtime is now a compile error.
 
 ---
 
@@ -78,8 +74,7 @@ Nothing that used to be a runtime hang survives this check.
 PulseHSM(const StaticState* stateTable, uint8_t count);
 ```
 
-Constructs a state machine over the given table. `count` must equal the number of
-elements in `stateTable` (i.e., `ST_COUNT`).
+Builds a state machine over the given table. `count` must equal the number of elements in `stateTable`, which is `ST_COUNT` in the example above.
 
 ---
 
@@ -89,18 +84,13 @@ elements in `stateTable` (i.e., `ST_COUNT`).
 bool begin(int startState);
 ```
 
-Starts the machine in `startState`. Calls the full entry chain from the root down
-to the resolved leaf. Resets the event queue and the dropped-events counter.
+Starts the machine in `startState`. It runs the entry callbacks from the root down to the resolved leaf, and it resets the event queue and the dropped-events counter.
 
-`startState` may be:
-- A **leaf** — entered directly.
-- A **composite with `initialChild` configured** — resolved recursively to the
-  deepest initial leaf.
+`startState` can be a leaf, which is entered directly, or a composite with `initialChild` set, which is resolved recursively down to the deepest initial leaf.
 
-Returns `false` if `startState` is out of range, or is a composite with
-`initialChild == -1` (a programming error caught by `PULSEHSM_VALIDATE_TABLE`).
+It returns `false` if `startState` is out of range, or if it is a composite with `initialChild == -1`. The second case is a programming error that `PULSEHSM_VALIDATE_TABLE` catches.
 
-Must be called once before `update()`.
+Call it once before the first `update()`.
 
 ---
 
@@ -110,14 +100,12 @@ Must be called once before `update()`.
 void update();
 ```
 
-The main scheduler tick. Call once per `loop()`.
+The scheduler tick. Call it once per `loop()`. Each tick does four things in this order:
 
-Order of operations each tick:
-1. Drain the event queue — dispatch each queued event via `onEvent` bubbling.
-2. Check the current state's timeout — if elapsed, apply the pending transition.
-3. Run `update()` callbacks from the root down to the current leaf.
-4. Apply any pending transition (from `transitionTo()`, a timeout, or an event
-   handler that called `transitionTo()`).
+1. Drains the event queue and dispatches each event through `onEvent` bubbling.
+2. Checks the current state's timeout. If it has elapsed, the transition becomes pending.
+3. Runs the `update()` callbacks from the root down to the current leaf.
+4. Applies the pending transition, whether it came from `transitionTo()`, a timeout, or an event handler that called `transitionTo()`.
 
 ---
 
@@ -127,14 +115,11 @@ Order of operations each tick:
 void transitionTo(int newState);
 ```
 
-Requests a transition to `newState`. The transition is **deferred** — it is
-applied at the end of the current `update()` tick, after `update()` callbacks run.
+Requests a transition to `newState`. The transition is deferred: it is applied at the end of the current `update()` tick, after the `update()` callbacks have run.
 
-Safe to call from inside `entry()`, `exit()`, `update()`, or `onEvent()`. If
-called from inside `entry()` or `exit()` (i.e., while a transition is already
-executing), the request is recorded and applied on the **next** `update()`.
+You can call it from `entry()`, `exit()`, `update()` or `onEvent()`. If you call it from `entry()` or `exit()`, while another transition is already running, the request is recorded and applied on the next `update()`.
 
-`newState` may be a leaf or a composite with `initialChild` configured.
+`newState` can be a leaf or a composite with `initialChild` set.
 
 ---
 
@@ -144,14 +129,11 @@ executing), the request is recorded and applied on the **next** `update()`.
 bool sendEvent(uint8_t event, int32_t data = 0);
 ```
 
-Enqueues an event into the interrupt-safe ring buffer. `data` is an optional
-32-bit payload readable via `getEventData()` inside the handler.
+Puts an event in the interrupt-safe ring buffer. `data` is an optional 32-bit payload that the handler reads with `getEventData()`.
 
-Returns `true` if the event was queued, `false` if the queue was full (event
-dropped). The queue capacity is `PULSEHSM_MAX_EVENTS`.
+Returns `true` if the event was queued and `false` if the queue was full and the event was dropped. The queue holds `PULSEHSM_MAX_EVENTS` events.
 
-Safe to call from an ISR. See [Events & Payloads](../guide/events.md) for
-interrupt-safety details per platform.
+It is safe to call from an ISR. Interrupt-safety details for each platform are in [Events & Payloads](../guide/events.md).
 
 ---
 
@@ -171,8 +153,7 @@ Returns the index of the current leaf state.
 const char* getCurrentName() const;
 ```
 
-Returns the `name` string of the current leaf state. Never returns `nullptr`
-(returns `""` for an unnamed state or when `PULSEHSM_NAMES=0`).
+Returns the `name` of the current leaf state. It never returns `nullptr`. For an unnamed state, or when `PULSEHSM_NAMES=0`, it returns `""`.
 
 ---
 
@@ -182,8 +163,7 @@ Returns the `name` string of the current leaf state. Never returns `nullptr`
 const char* getStateName(int idx) const;
 ```
 
-Returns the `name` string of the state at index `idx`. Returns `""` for an
-out-of-range or unnamed state, or when `PULSEHSM_NAMES=0`.
+Returns the `name` of the state at index `idx`. It returns `""` if the index is out of range, the state is unnamed, or `PULSEHSM_NAMES=0`.
 
 ---
 
@@ -193,9 +173,7 @@ out-of-range or unnamed state, or when `PULSEHSM_NAMES=0`.
 unsigned long getStateElapsed() const;
 ```
 
-Returns the number of milliseconds since the machine last entered the current
-state. Useful in `update()` for time-based behaviour that needs finer control than
-`timeoutMs`.
+Returns the milliseconds since the machine last entered the current state. Use it inside `update()` when you need finer timing control than `timeoutMs` gives you.
 
 ---
 
@@ -205,8 +183,7 @@ state. Useful in `update()` for time-based behaviour that needs finer control th
 int getPreviousState() const;
 ```
 
-Returns the index of the state the machine was in **before** the last transition.
-Returns `-1` before the first transition.
+Returns the index of the state the machine was in before the last transition, or `-1` if no transition has happened yet.
 
 ---
 
@@ -216,8 +193,7 @@ Returns `-1` before the first transition.
 const char* getPreviousName() const;
 ```
 
-Returns the `name` string of the previous state. Returns `""` before the first
-transition, or when `PULSEHSM_NAMES=0`.
+Returns the `name` of the previous state. It returns `""` before the first transition or when `PULSEHSM_NAMES=0`.
 
 ---
 
@@ -227,8 +203,7 @@ transition, or when `PULSEHSM_NAMES=0`.
 int32_t getEventData() const;
 ```
 
-Returns the `int32_t` payload of the event currently being dispatched. Valid only
-inside an `onEvent` callback (or any callback synchronously invoked from one).
+Returns the `int32_t` payload of the event being dispatched. It is only valid inside an `onEvent` callback, or inside any callback that an `onEvent` callback calls synchronously.
 
 ---
 
@@ -238,9 +213,7 @@ inside an `onEvent` callback (or any callback synchronously invoked from one).
 uint8_t getDroppedEvents() const;
 ```
 
-Returns the number of `sendEvent()` calls that were rejected because the queue was
-full since the last `begin()`. Saturates at 255. Use this to detect queue
-overflows at runtime.
+Returns how many `sendEvent()` calls were rejected because the queue was full since the last `begin()`. The count stops at 255. Check it to detect queue overflow at runtime.
 
 ```cpp
 if (fsm.getDroppedEvents() > 0) {
@@ -257,7 +230,7 @@ if (fsm.getDroppedEvents() > 0) {
 bool isInHierarchy(int state) const;
 ```
 
-Returns `true` if `state` is the current leaf **or** any active ancestor of it.
+Returns `true` if `state` is the current leaf or any active ancestor of it.
 
 ```cpp
 // While in state STARTING (child of RUNNING):
@@ -266,4 +239,4 @@ fsm.isInHierarchy(ST_RUNNING)  == true   // active ancestor
 fsm.isInHierarchy(ST_FAULT)    == false  // not in the active chain
 ```
 
-Useful for status displays and conditional logic outside the state machine.
+Handy for status displays and for logic outside the state machine.
