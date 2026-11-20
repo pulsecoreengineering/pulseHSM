@@ -1,9 +1,9 @@
-# Quick Start
+# Quick start
 
 ## Installation
 
 1. Download or clone the repository.
-2. Copy (or symlink) the folder into your Arduino `libraries/` directory as `PulseHSM`.
+2. Copy or symlink the folder into your Arduino `libraries/` directory as `PulseHSM`.
 3. Restart the Arduino IDE.
 
 ```
@@ -14,9 +14,9 @@
   ...
 ```
 
-## Step 1 — Two leaf states (a blinker)
+## Step 1: two leaf states (a blinker)
 
-The simplest possible machine: two states with timed transitions between them.
+The smallest useful machine is two states with timed transitions between them.
 
 ```cpp
 #include "PulseHSM.h"
@@ -46,13 +46,11 @@ void setup() {
 void loop() { fsm.update(); }
 ```
 
-State indices come from the `enum`. The table uses
-[designated array initializers](https://gcc.gnu.org/onlinedocs/gcc/Designated-Inits.html)
-(`[ST_ON] = {...}`) so the layout is self-documenting and order-independent.
+State indices come from the `enum`. The table uses [designated array initializers](https://gcc.gnu.org/onlinedocs/gcc/Designated-Inits.html) (`[ST_ON] = {...}`), so each row names its own state and the order of rows doesn't matter.
 
-## Step 2 — Add an event
+## Step 2: add an event
 
-Respond to a button press that toggles the blinker off permanently.
+This one handles a button press that stops the blinker for good.
 
 ```cpp
 enum Events : uint8_t { EVT_STOP = 1 };
@@ -62,16 +60,14 @@ bool onEvent(uint8_t e) {
     return false;
 }
 
-// Set onEvent as the onEvent field in the ST_ON row (sixth positional field after timeoutNext).
+// Set onEvent as the onEvent field in the ST_ON row (the field after timeoutNext).
 // From an ISR or loop():
 //   fsm.sendEvent(EVT_STOP);
 ```
 
-## Step 3 — Add a hierarchy
+## Step 3: add a hierarchy
 
-Group the two blink states under a `BLINKING` superstate, and add an `IDLE` state
-for when blinking is stopped. The `BLINKING` superstate handles `EVT_STOP` once,
-for both children.
+Put the two blink states under a `BLINKING` superstate and add an `IDLE` state for when blinking is stopped. `BLINKING` handles `EVT_STOP` once for both children.
 
 ```cpp
 #include "PulseHSM.h"
@@ -113,7 +109,7 @@ bool idleEvent(uint8_t e) {
 
 void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
-    fsm.begin(ST_BLINKING);   // initialChild = ST_ON → starts in ON
+    fsm.begin(ST_BLINKING);   // initialChild is ST_ON, so it starts in ON
 }
 
 void loop() {
@@ -126,17 +122,15 @@ void loop() {
 }
 ```
 
-Key points:
-- `ST_BLINKING.initialChild = ST_ON` — `transitionTo(ST_BLINKING)` and
-  `begin(ST_BLINKING)` both resolve to `ST_ON` automatically.
-- `blinkingEvent` handles `EVT_STOP` once — both `ST_ON` and `ST_OFF` inherit it.
-- Transitioning from `ST_ON` to `ST_OFF` exits `ST_ON` and enters `ST_OFF` only;
-  `ST_BLINKING`'s `entry`/`exit` do **not** run (it is the LCA).
-- Callbacks that reference `fsm` are forward-declared, then implemented **after**
-  `fsm` is defined.
+Things to notice in this version:
+
+- `ST_BLINKING.initialChild` is `ST_ON`, so `transitionTo(ST_BLINKING)` and `begin(ST_BLINKING)` both end up in `ST_ON`.
+- `blinkingEvent` handles `EVT_STOP` once, and both `ST_ON` and `ST_OFF` inherit it.
+- Going from `ST_ON` to `ST_OFF` exits `ST_ON` and enters `ST_OFF`. The `entry` and `exit` of `ST_BLINKING` don't run, because it is the lowest common ancestor (LCA).
+- Callbacks that use `fsm` are forward-declared and implemented after `fsm` is defined.
 
 ## What's next
 
-- [Initial Substates](initial-substates.md) — `initialChild` field in depth
-- [Events & Payloads](events.md) — `sendEvent()`, `getEventData()`, ISR safety
-- [Use Cases](../use-cases/overview.md) — fully worked real-world examples
+- [Initial Substates](initial-substates.md): the `initialChild` field in depth
+- [Events & Payloads](events.md): `sendEvent()`, `getEventData()` and ISR safety
+- [Use Cases](../use-cases/overview.md): worked real-world examples
